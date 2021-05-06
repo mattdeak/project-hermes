@@ -6,12 +6,17 @@ import random
 from enum import Enum
 import logging
 import uuid
+from collections import namedtuple
 
 SECRET_PATH = "secrets/ndax.json"
 NDAX_URL = "wss://api.ndax.io"
 
+BTCCAD_ID = 1
+BTCUSDT_ID = 82
+USDTCAT_ID = 80
 
-logging.basicConfig(level=logging.DEBUG)
+
+logging.basicConfig(level=logging.INFO)
 
 
 MESSAGE_TYPES = {
@@ -22,6 +27,22 @@ MESSAGE_TYPES = {
     "UNSUB": 4,
     "ERROR": 5,
 }
+
+L2Update = namedtuple(
+    "L2Update",
+    [
+        "MDUpdateId",
+        "AccountId",
+        "ActionDateTime",
+        "ActionType",
+        "LastTradePrice",
+        "OrderId",
+        "Price",
+        "ProductPairCode",
+        "Quantity",
+        "Side",
+    ],
+)
 
 
 class MFAError(Exception):
@@ -34,7 +55,9 @@ class AuthError(Exception):
 
 def create_request(message_type: int, function_name: str, payload: dict) -> str:
     i = random.randint(1, 10000)  # TODO thjis should be different/random
-    return json.dumps({"m": message_type, "i": i, "n": function_name, "o": json.dumps(payload)})
+    return json.dumps(
+        {"m": message_type, "i": i, "n": function_name, "o": json.dumps(payload)}
+    )
 
 
 class NDAXAuth:
@@ -67,10 +90,10 @@ class NDAXSession:
         await self.session.close()
 
     async def send(self, message):
-        await self.session.send(message)
+        return await self.session.send(message)
 
     async def recv(self):
-        await self.session.recv()
+        return await self.session.recv()
 
     async def _send_and_receive(self, req):
         await self.session.send(req)
@@ -98,7 +121,7 @@ class NDAXSession:
         mfa_code = input("Enter MFA: >")
         req = self.auth_manager.get_authenticate_2fa_request(mfa_code)
         response = await self._send_and_receive(req)
-        self.logger.debug(f'Response: {response}')
+        self.logger.debug(f"Response: {response}")
         payload = json.loads(response["o"])
 
         if payload["Authenticated"]:
@@ -127,29 +150,62 @@ def create_authentication_request(username, password):
     )
 
 
-def create_subscription_message(function, payload):
+def create_subscription_message(function: str, payload: dict):
     return create_request(MESSAGE_TYPES["SUBSCRIBE"], function, payload)
 
 
-def create_subscribe_level1_req(ticker: str) -> str:
-    payload = {"OMSId": 1, "Symbol": ticker}
-    return create_subscription_message("SubscribeLevel1", payload)
+def create_subscribe_level1_req(instrument_id: int) -> str:
+    payload = {"OMSId": 1, "InstrumentId": instrument_id}
+    return create_request(MESSAGE_TYPES["REQUEST"], "SubscribeLevel1", payload)
 
+
+def create_subscribe_level2_req(instrument_id: int, depth=5) -> str:
+    payload = {"OMSId": 1, "InstrumentId": instrument_id, "Depth": depth}
+    return create_request(MESSAGE_TYPES["REQUEST"], "SubscribeLevel2", payload)
 
 
 with open(SECRET_PATH, "r") as secret_file:
     data = json.load(secret_file)
 
+def parse_l2update(response):
+        payload = json.loads(json.loads(response)["o"])
+        return L2Update(payload)
+
+
 
 async def test():
+    response = None
     session = NDAXSession(data["username"], data["password"], data["secret"])
     await session.initialize_session()
-    await session.authenticate()
-    sub_req = create_subscribe_level1_req('BTCCAD')
-    await session.send(sub_req)
+    try:
+        await session.authenticate()
+        # req = create_request(0, 'GetInstruments', {'OMSId': 1})
 
-    async for message in session.session:
-        x = json.loads(message)
-        print(x)
+        req = create_subscribe_level2_req(BTCCAD_ID, depth=1)
+        await session.send(req)
+        response = await session.recv()
+
+        initial_response = parse_l2update(response)
+
+        async for message in session.session:
+            print('----')
+            print('BID: ')
+            payload = json.loads(json.loads(message)["o"])
+            update = L2Update(payload)
+            print(payload)
+
+    # await session.close()
+    # return response
+
+    # async for message in session.session:
+    #     x = json.loads(message)
+    #     print(x)
+    except Exception as e:
+        print(e)
+    finally:
+        await session.close()
+        return response
 
 
+if __name__ == "__main__":
+    asyncio.run(test())
