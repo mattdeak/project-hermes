@@ -91,7 +91,6 @@ class TriangleTrader:
         backward_val, backward_trade = self.triangle.backward()
 
         if forward_val > 1:
-
             pass
 
         if backward_val > 1:
