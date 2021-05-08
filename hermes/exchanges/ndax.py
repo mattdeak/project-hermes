@@ -229,6 +229,79 @@ def triangle_backward(
         return 1 / usdt_cad_ask / btc_usdt_ask * btc_cad_bid
 
 
+
+def lazy_triangle_forward(
+    btc_cad_ask,
+    btc_usdt_ask,
+    usdt_cad_bid,
+    btc_cad_ask_qty=None,
+    btc_usdt_ask_qty=None,
+    usdt_cad_bid_qty=None,
+    return_amount=True,
+):
+    if not (btc_cad_ask and btc_usdt_ask and usdt_cad_bid):
+        return None, None
+
+    if return_amount:
+        t1_effective_quantity = btc_cad_ask_qty * btc_cad_ask
+        t2_effective_quantity = btc_usdt_ask_qty * btc_cad_ask / 0.998
+        t3_effective_quantity = usdt_cad_bid_qty * usdt_cad_bid / (0.998 ** 2)
+
+        amount = min(
+            t1_effective_quantity, t2_effective_quantity, t3_effective_quantity
+        )
+        return 1 / (btc_cad_ask / btc_usdt_ask / usdt_cad_bid), amount
+
+
+def triangle_backward(
+    usdt_cad_ask,
+    btc_usdt_ask,
+    btc_cad_bid,
+    usdt_cad_ask_qty=None,
+    btc_usdt_ask_qty=None,
+    btc_cad_bid_qty=None,
+    return_amount=True,
+):
+    if not (usdt_cad_ask and btc_usdt_ask and btc_cad_bid):
+        return None, None
+    if return_amount:
+        t1_effective_quantity = usdt_cad_ask * usdt_cad_ask_qty
+        t2_effective_quantity = btc_usdt_ask_qty * btc_usdt_ask / 0.998
+        t3_effective_quantity = btc_cad_bid_qty * btc_cad_bid / (0.998 ** 2)
+
+        amount = min(
+            t1_effective_quantity, t2_effective_quantity, t3_effective_quantity
+        )
+        return 1 / usdt_cad_ask / btc_usdt_ask * btc_cad_bid, amount
+
+    if usdt_cad_ask and btc_usdt_ask and btc_cad_bid:
+        return 1 / usdt_cad_ask / btc_usdt_ask * btc_cad_bid
+
+def triangle_backward(
+    usdt_cad_ask,
+    btc_usdt_ask,
+    btc_cad_bid,
+    usdt_cad_ask_qty=None,
+    btc_usdt_ask_qty=None,
+    btc_cad_bid_qty=None,
+    return_amount=True,
+):
+    if not (usdt_cad_ask and btc_usdt_ask and btc_cad_bid):
+        return None, None
+    if return_amount:
+        t1_effective_quantity = usdt_cad_ask * usdt_cad_ask_qty
+        t2_effective_quantity = btc_usdt_ask_qty * btc_usdt_ask / 0.998
+        t3_effective_quantity = btc_cad_bid_qty * btc_cad_bid / (0.998 ** 2)
+
+        amount = min(
+            t1_effective_quantity, t2_effective_quantity, t3_effective_quantity
+        )
+        return 1 / usdt_cad_ask / btc_usdt_ask * btc_cad_bid, amount
+
+    if usdt_cad_ask and btc_usdt_ask and btc_cad_bid:
+        return 1 / usdt_cad_ask / btc_usdt_ask * btc_cad_bid
+
+
 async def test():
     response = None
     session = NDAXSession(data["username"], data["password"], data["secret"])
@@ -311,6 +384,16 @@ async def test():
                     return_amount=True,
                 )
 
+                lazy_triangle_forward_val, lazy_forward_amount = triangle_forward(
+                    btc_cad_ask,
+                    btc_usdt_ask,
+                    usdt_cad_bid,
+                    btc_cad_ask_qty=btc_cad_ask_qty,
+                    btc_usdt_bid_qty=btc_usdt_ask_qty,
+                    usdt_cad_bid_qty=usdt_cad_bid_qty,
+                    return_amount=True,
+                )
+
                 triangle_backward_val, backward_amount = triangle_backward(
                     usdt_cad_ask,
                     btc_usdt_ask,
@@ -333,10 +416,35 @@ async def test():
                     else 0
                 )
 
+                lazy_adjusted_forward = (
+                    lazy_triangle_forward_val * (1 - FEE) ** 3 if lazy_triangle_forward_val else 0
+                )
+
                 expected_forward_net = (adjusted_forward - 1) * forward_amount
+                expected_lazy_forward_net = (lazy_adjusted_forward - 1) * lazy_forward_amount
                 expected_backward_net = (adjusted_backward - 1) * backward_amount
 
-                if adjusted_backward > 1 or adjusted_forward > 1:
+                print(f'Forward: {expected_forward_net}')
+                print(f'Lazy Forward: {expected_lazy_forward_net}')
+                print(f'Backward: {expected_backward_net}')
+                print('------------------------------')
+
+                if adjusted_backward > 1 or adjusted_forward > 1 or lazy_adjusted_forward > 1:
+                    if lazy_adjusted_forward > 1:
+
+                        print("----")
+                        print(
+                            f"Lazy Forward Opportunity Detected at {last_update_time}: {action_type}"
+                        )
+                        print(
+                            f"Lazy Forward: {lazy_adjusted_forward}, Tradable L1 {lazy_forward_amount}, Expected Profit at 100% capture: {expected_lazy_forward_net}"
+                        )
+                        print(f"Prices: {btc_cad_ask}, {btc_usdt_ask}, {usdt_cad_bid}")
+                        print(
+                            f"Quantities: {btc_cad_ask_qty}, {btc_usdt_ask_qty}, {usdt_cad_bid_qty}"
+                        )
+                        print("---")
+
                     if adjusted_forward > 1:
 
                         print("----")
@@ -351,7 +459,7 @@ async def test():
                             f"Quantities: {btc_cad_ask_qty}, {btc_usdt_bid_qty}, {usdt_cad_bid_qty}"
                         )
                         print("---")
-                    else:
+                    if adjusted_backward > 1:
 
                         print(
                             f"Backward Opportunity Detected at {last_update_time}: {action_type}"

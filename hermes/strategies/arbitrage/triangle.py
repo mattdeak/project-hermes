@@ -2,7 +2,10 @@ import logging
 import asyncio
 from collections import namedtuple
 
+OrderbookLine = namedtuple('OrderbookLine', ['price','quantity'])
 Instrument = namedtuple("Instrument", ["bid", "ask"])
+
+
 
 
 class TriangleResponse:
@@ -14,19 +17,23 @@ class TriangleBTCUSDT:
     def __init__(
         self, btc_cad, btc_usdt, usdt_cad, fee=0.002,  # Base to X. Eg BTC_CAD  # 0.2%
     ):
-        self.fee_per_trade = fee_per_trade
+        self.adjusted_single_trade_value = (1-fee)
+        self.triangle_value_multiplier = (1-fee)**3
 
         self.btc_cad = btc_cad
         self.btc_usdt = btc_usdt
         self.usdt_cad = usdt_cad
 
-        self.forward_method = self._create_forward_method(None)
-        self.backward_method = self._create_backward_method(None)
-
     # TODO: The quantities need to be different. I need to get the effective trade in the
     # target currency.
     #   Fine the minimum price, get appropriate amounts for each currency. Need them to issue trades.
-    def _forward(self):
+    def forward(self):
+
+        return 1 / (
+            self.btc_cad.ask.price / self.btc_usdt.bid.price / self.usdt_cad.bid.price
+        ) * self.triangle_value_multiplier
+
+    def forward_with_l1_limit(self):
         fee = self.fee  # alias
         t1_effective_quantity = self.btc_cad.ask.quantity * self.btc_cad.ask.price
         t2_effective_quantity = self.btc_cad.ask.quantity * self.btc_cad.ask.price / fee
@@ -42,15 +49,15 @@ class TriangleBTCUSDT:
             viable_trade,
         )
 
-    def get_forward_orders(self, viable_trade, cash_available):
+    def get_forward_orders(self, cash_available):
         # This is harder than I thought
-        # 
+        #
         # First I need to identify what the bottleneck is between the three
         # Then I need to propagate the value of that trade back
 
         # Aliases
-        fee_adjustment = (1-self.fees)
-        squared_fee_adjustment = (1/self.fees)**2
+        fee_adjustment = self.adjusted_single_trade_value
+        squared_fee_adjustment = fee_adjustment ** 2
 
         btc_cad_ask_qty = self.btc_cad.ask.quantity
         btc_usdt_bid_qty = self.btc_usdt.bid.quantity
@@ -60,30 +67,31 @@ class TriangleBTCUSDT:
         btc_usdt_bid_price = self.btc_usdt.bid.price
         usdt_cad_bid_price = self.usdt_cad.bid.price
 
-
         order1_qty = min(
-                cash_available / btc_cad_ask_price,
-                btc_cad_ask_qty,
-                btc_usdt_bid_qty/fee_adjustment,
-                usdt_cad_bid_qty * usdt_cad_bid_price * squared_fee_adjustment)
+            cash_available / btc_cad_ask_price,
+            btc_cad_ask_qty,
+            btc_usdt_bid_qty / fee_adjustment,
+            usdt_cad_bid_qty * usdt_cad_bid_price * squared_fee_adjustment,
+        )
 
         order2_qty = min(
-                cash_available / btc_cad_ask_price * fee_adjustment,
-                btc_cad_ask_qty * fee_adjustment,
-                btc_usdt_bid_qty,
-                (usdt_cad_bid_qty/usdt_cad_bid_price) / fee_adjustment
-                )
+            cash_available / btc_cad_ask_price * fee_adjustment,
+            btc_cad_ask_qty * fee_adjustment,
+            btc_usdt_bid_qty,
+            (usdt_cad_bid_qty / usdt_cad_bid_price) / fee_adjustment,
+        )
 
         order3_qty = min(
-                cash_available / btc_cad_ask_price * btc_usdt_bid_price * squared_fee_adjustment,
-                btc_cad_ask_qty * btc_usdt_bid_price * squared_fee_adjustment,
-                btc_usdt_bid_qty * btc_usdt_bid_price * squared_fee_adjustment,
-                usdt_cad_bid_qty
-                )
-        
+            cash_available
+            / btc_cad_ask_price
+            * btc_usdt_bid_price
+            * squared_fee_adjustment,
+            btc_cad_ask_qty * btc_usdt_bid_price * squared_fee_adjustment,
+            btc_usdt_bid_qty * btc_usdt_bid_price * squared_fee_adjustment,
+            usdt_cad_bid_qty,
+        )
 
         return (order1_qty, order2_qty, order3_qty)
-
 
     def _get_orders_at(self):
         pass
@@ -114,8 +122,8 @@ class TriangleBTCUSDT:
         )
 
     def get_backward_orders(self, cash_available):
-        fee_adjustment = (1-self.fees)
-        squared_fee_adjustment = (1/self.fees)**2
+        fee_adjustment = 1 - self.fees
+        squared_fee_adjustment = (1 / self.fees) ** 2
 
         btc_cad_bid_qty = self.btc_cad.bid.quantity
         btc_usdt_ask_qty = self.btc_usdt.ask.quantity
@@ -128,8 +136,8 @@ class TriangleBTCUSDT:
         # TODO: Implement backward orders
         pass
 
-class NDAXTrader:
 
+class NDAXTrader:
     def __init__(self, session, trade_queue):
         self.trade_queue
         pass
@@ -142,16 +150,9 @@ class NDAXTrader:
     async def handle_trades(self):
         pass
 
-            
-class NDAXTriangleTrader(NDAXTrader):
+    async def handle_trades(self):
+        pass
 
-
-class TriangleLazyTrader:
-    def __init__(
-            self,
-            session,
-            )
-    pass
 
 class TriangleMarketTrader:
     def __init__(
@@ -194,3 +195,4 @@ class TriangleMarketTrader:
 
             confirmation = await message_queue.pop()
             self.handle_confirmation(confirmation)
+
