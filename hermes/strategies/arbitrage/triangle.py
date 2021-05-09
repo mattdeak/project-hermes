@@ -2,36 +2,43 @@ import logging
 import asyncio
 from collections import namedtuple
 
-OrderbookLine = namedtuple('OrderbookLine', ['price','quantity'])
+OrderbookLine = namedtuple("OrderbookLine", ["price", "quantity"])
 Instrument = namedtuple("Instrument", ["bid", "ask"])
-
-
-
-
-class TriangleResponse:
-    def __init__(self):
-        pass
 
 
 class TriangleBTCUSDT:
     def __init__(
-        self, btc_cad, btc_usdt, usdt_cad, fee=0.002,  # Base to X. Eg BTC_CAD  # 0.2%
+        self,
+        btc_cad,
+        btc_usdt,
+        usdt_cad,
+        fee=0.002,
+        max_btc_order=float("inf"),
+        max_usdt_order=float("inf"),  # Base to X. Eg BTC_CAD  # 0.2%
     ):
-        self.adjusted_single_trade_value = (1-fee)
-        self.triangle_value_multiplier = (1-fee)**3
+        self.adjusted_single_trade_value = 1 - fee
+        self.triangle_value_multiplier = (1 - fee) ** 3
 
         self.btc_cad = btc_cad
         self.btc_usdt = btc_usdt
         self.usdt_cad = usdt_cad
 
+        self.max_btc_order = max_btc_order
+        self.max_usdt_order = max_usdt_order
+
     # TODO: The quantities need to be different. I need to get the effective trade in the
     # target currency.
     #   Fine the minimum price, get appropriate amounts for each currency. Need them to issue trades.
     def forward(self):
-
-        return 1 / (
-            self.btc_cad.ask.price / self.btc_usdt.bid.price / self.usdt_cad.bid.price
-        ) * self.triangle_value_multiplier
+        return (
+            1
+            / (
+                self.btc_cad.ask.price
+                / self.btc_usdt.bid.price
+                / self.usdt_cad.bid.price
+            )
+            * self.triangle_value_multiplier
+        )
 
     def forward_with_l1_limit(self):
         fee = self.fee  # alias
@@ -50,12 +57,6 @@ class TriangleBTCUSDT:
         )
 
     def get_forward_orders(self, cash_available):
-        # This is harder than I thought
-        #
-        # First I need to identify what the bottleneck is between the three
-        # Then I need to propagate the value of that trade back
-
-        # Aliases
         fee_adjustment = self.adjusted_single_trade_value
         squared_fee_adjustment = fee_adjustment ** 2
 
@@ -92,9 +93,6 @@ class TriangleBTCUSDT:
         )
 
         return (order1_qty, order2_qty, order3_qty)
-
-    def _get_orders_at(self):
-        pass
 
     def _backward(self):
         fee = self.fee
@@ -195,4 +193,3 @@ class TriangleMarketTrader:
 
             confirmation = await message_queue.pop()
             self.handle_confirmation(confirmation)
-
