@@ -1,7 +1,8 @@
 import asyncio
-from asyncio import Event
+from asyncio import Condition
 from dataclasses import dataclass
-from collections import namedtuple, defaultdict
+from sortedcontainers import SortedDict, SortedItemsView
+from collections import namedtuple
 
 L2Update = namedtuple(
     "L2Update",
@@ -19,53 +20,62 @@ L2Update = namedtuple(
     ],
 )
 
+class OrderBook:
 
-@dataclass
-class OrderbookLine:
-    price: float
-    quantity: float
+    def __init__(self, depth):
+        self.depth = depth
+        self.bid = SortedDict()
+        self.ask = SortedDict()
 
+        self.bid_depth_view = self.bid.items()
+        self.ask_depth_view = self.ask.items()
+    
+    def get_bids(self):
+        return self.bid_depth_view[-self.depth:]
 
-@dataclass
-class Instrument:
-    bid: OrderbookLine
-    ask: OrderbookLine
-
-
-DUMMY_LINE = Instrument(bid=OrderbookLine(0, 0), ask=OrderbookLine(0, 0))
-
+    def get_asks(self):
+        return self.ask_depth_view[:self.depth]
+        
 
 class NDAXOrderBook:
     def __init__(self, instrument_ids=(1, 80, 82), depth=5):
-        self.is_updated = Event()
+        self.updated = Condition()
 
-        self.book = defaultdict(list)
+        self.book = {}
         self.initialize_book(instrument_ids, depth)
         self.depth = depth
 
     def initialize_book(self, instrument_ids, depth):
         for _id in instrument_ids:
-            self.book[_id] = [DUMMY_LINE for i in range(depth)]
+            self.book[_id] = OrderBook(depth)
+
+    def __getitem__(self, key):
+        return self.book[key]
 
     async def update(self, payload):
-        print(len(payload))
+        async with self.updated:
+            print(len(payload))
 
-        updates = [L2Update(*update) for update in payload]
-        
+            updates = [L2Update(*update) for update in payload]
+            for update in updates:
+                self.handle_update(update)
 
-        for i, update in enumerate(updates):
-            action_type = update.ActionType
-            action_time = update.ActionDateTime
-            instrument_id = update.ProductPairCode
+            self.updated.notify_all()
 
-            if action_type < 2:  # still not sure how to handle deletes
-                line = OrderbookLine(price=update.Price, quantity=update.Quantity)
-                if update.Side == 1:
-                    self.book[instrument_id][i - self.depth].ask.price = update.Price
-                    self.book[instrument_id][i - self.depth].ask.quantity = update.Quantity
-                else:
-                    self.book[instrument_id][i].bid.price = update.Price
-                    self.book[instrument_id][i].bid.quantity = update.Quantity
+    def handle_update(self, update):
+        if update.Side == 0:
+            book_to_update = self.book[update.ProductPairCode].bid
+        else:
+            book_to_update = self.book[update.ProductPairCode].ask
 
-        await self.is_updated.set()
-        await self.is_updated.clear()
+        price = update.Price
+        quantity = update.Quantity
+        if update.ActionType < 2:
+            book_to_update[price] = quantity
+        else:
+            try: # still not sure why we get delete orders for stuff not in our sights
+                book_to_update.pop(price)
+            except KeyError as e:
+                print(f'Price not found {price}')
+
+        # await self.is_updated.clear()
