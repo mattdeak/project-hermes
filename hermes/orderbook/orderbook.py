@@ -20,24 +20,54 @@ L2Update = namedtuple(
     ],
 )
 
-class OrderBook:
 
+class AskSide(SortedDict):
+
+    def __init__(self, depth, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.depth = depth
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if len(self) > self.depth:
+            self.popitem(-1)
+
+class BidSide(SortedDict):
+    def __init__(self, depth, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.depth = depth
+
+    def __setitem__(self, key, value):
+        super().__setitem__(key, value)
+        if len(self) > self.depth:
+            self.popitem(0)
+
+class OrderBook:
     def __init__(self, depth):
         self.depth = depth
-        self.bid = SortedDict()
-        self.ask = SortedDict()
+        self.bid = BidSide(depth)
+        self.ask = AskSide(depth)
 
         self.bid_depth_view = self.bid.items()
         self.ask_depth_view = self.ask.items()
+
+        self.ask_prices = self.ask.keys()
+        self.bid_prices = self.bid.keys()
     
     def get_bids(self):
-        return self.bid_depth_view[-self.depth:]
+        return self.bid_depth_view[:-self.depth-1:-1]
 
     def get_asks(self):
         return self.ask_depth_view[:self.depth]
+
+    def get_ask_prices(self):
+        return self.ask_prices[:self.depth]
+
+    def get_bid_prices(self):
+        return self.bid_prices[:-self.depth-1:-1]
         
 
-class NDAXOrderBook:
+class MultiOrderBook:
     def __init__(self, instrument_ids=(1, 80, 82), depth=5):
         self.updated = Condition()
 
@@ -54,8 +84,6 @@ class NDAXOrderBook:
 
     async def update(self, payload):
         async with self.updated:
-            print(len(payload))
-
             updates = [L2Update(*update) for update in payload]
             for update in updates:
                 self.handle_update(update)
@@ -65,8 +93,10 @@ class NDAXOrderBook:
     def handle_update(self, update):
         if update.Side == 0:
             book_to_update = self.book[update.ProductPairCode].bid
-        else:
+        elif update.Side == 1:
             book_to_update = self.book[update.ProductPairCode].ask
+        else:
+            print('What the fuck is this')
 
         price = update.Price
         quantity = update.Quantity
