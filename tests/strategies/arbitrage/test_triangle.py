@@ -1,91 +1,235 @@
 import pytest
 
-from hermes.strategies.arbitrage.triangle import Instrument, OrderbookLine
-from hermes.strategies.arbitrage.triangle import TriangleBTCUSDT
+from hermes.strategies.arbitrage.triangle import TriangleBTCUSDTL1
+from hermes.orderbook.orderbook import  MultiOrderBook, OrderBook
+from hermes.exchanges.ndax import BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID
 
-
-dummy_side = OrderbookLine(price=0, quantity=0)
-
-
-@pytest.fixture
-def forward_trades_cash_bottleneck():
-
-    btc_cad = Instrument(
-        ask=OrderbookLine(price=69622.22, quantity=0.034), bid=dummy_side
-    )
-
-    btc_usdt = Instrument(bid=OrderbookLine(price=56945.6, quantity=2), ask=dummy_side)
-    usdt_cad = Instrument(bid=OrderbookLine(price=1.23, quantity=1000), ask=dummy_side)
-
-    return [btc_cad, btc_usdt, usdt_cad]
-
+sample_bids = []
+sample_asks = []
 
 @pytest.fixture
-def forward_trades_q1_bottleneck():
+def orderbook_1():
+    orderbook = MultiOrderBook(depth=1)
 
-    # TODO: Alter
-    btc_cad = Instrument(
-        ask=OrderbookLine(price=69622.22, quantity=0.034), bid=dummy_side
-    )
-    btc_usdt = Instrument(bid=OrderbookLine(price=56945.6, quantity=2), ask=dummy_side)
-    usdt_cad = Instrument(bid=OrderbookLine(price=1.23, quantity=1000), ask=dummy_side)
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
 
-    return [btc_cad, btc_usdt, usdt_cad]
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
 
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
 
-@pytest.fixture
-def forward_trades_q2_bottleneck():
+    usdt_cad_orderbook.ask[1.2343] = 1234.16
+    usdt_cad_orderbook.bid[1.2166] = 34.96
 
-    # TODO: Alter
-    btc_cad = Instrument(
-        ask=OrderbookLine(price=69622.22, quantity=0.034), bid=dummy_side
-    )
-    btc_usdt = Instrument(bid=OrderbookLine(price=56945.6, quantity=2), ask=dummy_side)
-    usdt_cad = Instrument(bid=OrderbookLine(price=1.23, quantity=1000), ask=dummy_side)
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
 
-    return [btc_cad, btc_usdt, usdt_cad]
-
+    return orderbook
 
 @pytest.fixture
-def forwad_trades_q3_bottleneck():
+def orderbook_2():
+    orderbook = MultiOrderBook(depth=1)
 
-    # TODO: Alter
-    btc_cad = Instrument(
-        ask=OrderbookLine(price=69622.22, quantity=0.034), bid=dummy_side
-    )
-    btc_usdt = Instrument(bid=OrderbookLine(price=56945.6, quantity=2), ask=dummy_side)
-    usdt_cad = Instrument(bid=OrderbookLine(price=1.23, quantity=1000), ask=dummy_side)
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
 
-    return [btc_cad, btc_usdt, usdt_cad]
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
 
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
 
-def test_triangle_value_forward(forward_trades_cash_bottleneck):
-    btc_cad, btc_usdt, usdt_cad = forward_trades_cash_bottleneck
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
+    return orderbook
 
-    triangle = TriangleBTCUSDT(btc_cad, btc_usdt, usdt_cad)
+@pytest.fixture()
+def orderbook_forward_arb_btccad_ask_bottleneck():
+    orderbook = MultiOrderBook(depth=1)
 
-    value = triangle.forward()
-    true_value = 1.000020818
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
 
-    assert pytest.approx(value, true_value, abs=1e-8)
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
 
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
 
-def test_triangle_value_backward(forward_trades_1):
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
     pass
 
+@pytest.fixture()
+def orderbook_backward_arb_btccad_bid_bottleneck():
+    orderbook = MultiOrderBook(depth=1)
 
-def test_triangle_trades_forward(forward_trades_q1_bottleneck):
-    btc_cad, btc_usdt, usdt_cad = forward_trades_q1_bottleneck
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
 
-    triangle = TriangleBTCUSDT(btc_cad, btc_usdt, usdt_cad)
-    cash_available = 1000
-    orders = triangle.get_forward_orders(cash_available)
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
 
-    true_orders = [0.01436323059, 0.01433450413, 814.6543644]
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
 
-    for order, true_order in zip(orders, true_orders):
-        assert pytest.approx(order, true_order, abs=1e-9)
-
-
-def test_triangle_trades_backward(forward_trades_1):
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
     pass
+
+@pytest.fixture()
+def orderbook_forward_arb_btcusdt_bid_bottleneck():
+    orderbook = MultiOrderBook(depth=1)
+
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
+
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
+
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
+
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
+    pass
+
+@pytest.fixture()
+def orderbook_backward_arb_btcusdt_ask_bottleneck():
+    orderbook = MultiOrderBook(depth=1)
+
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
+
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
+
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
+
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
+    pass
+
+@pytest.fixture()
+def orderbook_forward_arb_usdtcad_bottleneck():
+    orderbook = MultiOrderBook(depth=1)
+
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
+
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
+
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
+
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
+    pass
+
+@pytest.fixture()
+def orderbook_backward_arb_usdtcad_ask_bottleneck():
+    orderbook = MultiOrderBook(depth=1)
+
+    btc_cad_orderbook = OrderBook(depth=1)
+    btc_usdt_orderbook = OrderBook(depth=1)
+    usdt_cad_orderbook = OrderBook(depth=1)
+    
+    btc_cad_orderbook.ask[68971.67] = 0.044
+    btc_cad_orderbook.bid[68910] = 0.15759
+
+    btc_usdt_orderbook.ask[57049.62] = 0.053027
+    btc_usdt_orderbook.bid[56538.5] = 0.15759
+
+    usdt_cad_orderbook.ask[1.4] = 1234.16
+    usdt_cad_orderbook.bid[1.3] = 34.96
+
+    orderbook[BTCCAD_ID] = btc_cad_orderbook
+    orderbook[BTCUSDT_ID] = btc_usdt_orderbook
+    orderbook[USDTCAD_ID] = usdt_cad_orderbook
+    pass
+
+class Test_MarketTriangleL1:
+
+    def test_orderbook_1_value(self, orderbook_1):
+        triangle = TriangleBTCUSDTL1(orderbook_1, fee=0.002)
+
+        forward = triangle.forward()
+        forward_value = 0.9913179648
+        backward = triangle.backward()
+        backward_value = 0.9727480946
+
+        assert forward == pytest.approx(forward_value, abs=1e-8)
+        assert backward == pytest.approx(backward_value, abs=1e-8)
+
+    def test_orderbook_2_value(self, orderbook_2):
+        triangle = TriangleBTCUSDTL1(orderbook_2, fee=0.002)
+
+        forward = triangle.forward()
+        forward_value = 1.059274498
+        backward = triangle.backward()
+        backward_value = 0.8576164094
+
+        assert forward == pytest.approx(forward_value, abs=1e-8)
+        assert backward ==pytest.approx(backward_value, abs=1e-8)
+
+    def test_orderbook_1_net(self, orderbook_1):
+        cash_available = 10000 # Not the bottleneck
+        triangle = TriangleBTCUSDTL1(orderbook_1)
+        forward_net = triangle.forward_net(cash_available)
+        backward_net = triangle.backward_net(cash_available)
+
+        true_forward_net = -0.3717563059
+        true_backward_net = -41.513473
+
+
+        assert forward_net == pytest.approx(true_forward_net, abs=1e-5)
+        assert backward_net == pytest.approx(true_backward_net, abs=1e-5)
+
+    def test_orderbook_2_net(self, orderbook_2):
+        cash_available = 10000
+        triangle = TriangleBTCUSDTL1(orderbook_2)
+
+        forward_net = triangle.forward_net(cash_available)
+        backward_net = triangle.backward_net(cash_available)
+
+        true_forward_net = 2.538076366
+        true_backward_net = -246.013785
+
+        assert forward_net == pytest.approx(true_forward_net, abs=1e-5)
+        assert backward_net == pytest.approx(true_backward_net, abs=1e-5)

@@ -1,123 +1,92 @@
 import logging
 import asyncio
 from collections import namedtuple
+from hermes.exchanges.ndax import BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID
+from hermes.utils.structures import Order
+from typing import Tuple
+from functools import lru_cache
 
 OrderbookLine = namedtuple("OrderbookLine", ["price", "quantity"])
 Instrument = namedtuple("Instrument", ["bid", "ask"])
 
 
-class TriangleBTCUSDT:
-    def __init__(
-        self,
-        btc_cad,
-        btc_usdt,
-        usdt_cad,
-        fee=0.002,
-        max_btc_order=float("inf"),
-        max_usdt_order=float("inf"),  # Base to X. Eg BTC_CAD  # 0.2%
-    ):
+class TriangleBTCUSDTL1:
+    def __init__(self, orderbook, fee=0.002):  # Base to X. Eg BTC_CAD  # 0.2%
         self.adjusted_single_trade_value = 1 - fee
         self.triangle_value_multiplier = (1 - fee) ** 3
 
-        self.btc_cad = btc_cad
-        self.btc_usdt = btc_usdt
-        self.usdt_cad = usdt_cad
+        self.instrument_ids = BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID
+        self.orderbook = orderbook
 
-        self.max_btc_order = max_btc_order
-        self.max_usdt_order = max_usdt_order
-
-    # TODO: The quantities need to be different. I need to get the effective trade in the
-    # target currency.
-    #   Fine the minimum price, get appropriate amounts for each currency. Need them to issue trades.
-    def forward(self):
+    def forward(self) -> float:
         return (
             1
             / (
-                self.btc_cad.ask.price
-                / self.btc_usdt.bid.price
-                / self.usdt_cad.bid.price
+                self.orderbook[BTCCAD_ID].get_ask_prices()[0]
+                / self.orderbook[BTCUSDT_ID].get_bid_prices()[0]
+                / self.orderbook[USDTCAD_ID].get_bid_prices()[0]
             )
             * self.triangle_value_multiplier
         )
 
-    def forward_with_l1_limit(self):
-        fee = self.fee  # alias
-        t1_effective_quantity = self.btc_cad.ask.quantity * self.btc_cad.ask.price
-        t2_effective_quantity = self.btc_cad.ask.quantity * self.btc_cad.ask.price / fee
-        t3_effective_quantity = (
-            self.usdt_cad.bid.quantity * self.usdt_cad.bid.price / fee ** 2
-        )
+    def forward_net(self, cash_available):
+        value, _ = self._get_forward_bottleneck_ix_and_cash_value(cash_available)
+        multiplier = self.forward()
+        return (multiplier - 1) * value
 
-        viable_trade = min(
-            t1_effective_quantity, t2_effective_quantity, t3_effective_quantity
-        )
-        return (
-            1 / (self.btc_cad.ask / self.btc_usdt.bid.price / self.usdt_cad.bid.price),
-            viable_trade,
-        )
+    def get_forward_orders(self, cash_available: float) -> Tuple[Order]:
+        # This is harder than I thought
+        #
+        # First I need to identify what the bottleneck is between the three
+        # Then I need to propagate the value of that trade back
 
-    def get_forward_orders(self, cash_available):
+        # Aliases
         fee_adjustment = self.adjusted_single_trade_value
-        squared_fee_adjustment = fee_adjustment ** 2
 
-        btc_cad_ask_qty = self.btc_cad.ask.quantity
-        btc_usdt_bid_qty = self.btc_usdt.bid.quantity
-        usdt_cad_bid_qty = self.usdt_cad.bid.quantity
+        ix, trade_value = self._get_forward_bottleneck_ix_and_cash_value(cash_available)
+        btc_cad_ask_price, btc_cad_ask_qty = self.orderbook[BTCCAD_ID].get_asks()[0]
+        btc_usdt_bid_price, btc_usdt_bid_qty = self.orderbook[BTCUSDT_ID].get_bids()[0]
+        usdt_cad_bid_price, usdt_cad_bid_qty = self.orderbook[USDTCAD_ID].get_bids()[0]
 
-        btc_cad_ask_price = self.btc_cad.ask.price
-        btc_usdt_bid_price = self.btc_usdt.bid.price
-        usdt_cad_bid_price = self.usdt_cad.bid.price
+        if ix == 0:  # Cash bottleneck
+            order1_qty = cash_available / btc_cad_ask_price
+            order2_qty = cash_available / btc_cad_ask_price * fee_adjustment
+            order3_qty = (
+                cash_available
+                / btc_cad_ask_price
+                * btc_usdt_bid_price
+                * fee_adjustment ** 2
+            )
 
-        order1_qty = min(
-            cash_available / btc_cad_ask_price,
-            btc_cad_ask_qty,
-            btc_usdt_bid_qty / fee_adjustment,
-            usdt_cad_bid_qty * usdt_cad_bid_price * squared_fee_adjustment,
-        )
+        elif ix == 1:  # BTC Ask bottleneck
+            order1_qty = btc_cad_ask_qty
+            order2_qty = btc_cad_ask_qty * fee_adjustment
+            order3_qty = btc_cad_ask_qty * btc_usdt_bid_price * fee_adjustment ** 2
 
-        order2_qty = min(
-            cash_available / btc_cad_ask_price * fee_adjustment,
-            btc_cad_ask_qty * fee_adjustment,
-            btc_usdt_bid_qty,
-            (usdt_cad_bid_qty / usdt_cad_bid_price) / fee_adjustment,
-        )
+        elif ix == 2:  # BTC Bid Bottleneck
+            order1_qty = btc_usdt_bid_qty / fee_adjustment
+            order2_qty = btc_usdt_bid_qty
+            order3_qty = btc_usdt_bid_qty * btc_usdt_bid_price * fee_adjustment
 
-        order3_qty = min(
-            cash_available
-            / btc_cad_ask_price
-            * btc_usdt_bid_price
-            * squared_fee_adjustment,
-            btc_cad_ask_qty * btc_usdt_bid_price * squared_fee_adjustment,
-            btc_usdt_bid_qty * btc_usdt_bid_price * squared_fee_adjustment,
-            usdt_cad_bid_qty,
-        )
+        elif ix == 3:  # USDT Bid Bottleneck
+            order1_qty = usdt_cad_bid_qty * usdt_cad_bid_price
 
         return (order1_qty, order2_qty, order3_qty)
 
-    def _backward(self):
-        fee = self.fee
-
-        t1_effective_quantity = self.usdt_cad.ask.price * self.usdt_cad.ask.quantity
-        t2_effective_quantity = (
-            self.btc_usdt.ask.price * self.btc_usdt.ask.quantity / fee
-        )
-        t3_effective_quantity = (
-            self.btc_cad.bid.price * self.btc_cad.bid.quantity / fee ** 2
-        )
-
-        viable_trade = min(
-            t1_effective_quantity, t2_effective_quantity, t3_effective_quantity
-        )
-
+    def backward(self):
         return (
-            (
-                1
-                / self.usdt_cad.ask.price
-                / self.btc_usdt.ask.price
-                * self.btc_cad.bid.price
-            ),
-            viable_trade,
-        )
+            1
+            / self.orderbook[USDTCAD_ID].get_ask_prices()[0]
+            / self.orderbook[BTCUSDT_ID].get_ask_prices()[0]
+            * self.orderbook[BTCCAD_ID].get_bid_prices()[0]
+        ) * self.triangle_value_multiplier
+
+    def backward_net(self, cash_available):
+        value, _ = self._get_backward_bottleneck_ix_and_cash_value(cash_available)
+        multiplier = self.backward()
+
+        return (multiplier - 1) * value
+
 
     def get_backward_orders(self, cash_available):
         fee_adjustment = 1 - self.fees
@@ -134,62 +103,68 @@ class TriangleBTCUSDT:
         # TODO: Implement backward orders
         pass
 
+    def _get_forward_bottleneck_ix_and_cash_value(
+        self, cash_available
+    ) -> Tuple[float, int]:
+        # Gets the L1 tradethrough value in cash amounts
+        # and provides the trade_ix, which can be used to efficiently
+        # get the trade orders
+        btc_cad_ask_price, btc_cad_ask_qty = self.orderbook[BTCCAD_ID].get_asks()[0]
+        usdt_cad_bid_price, usdt_cad_bid_qty = self.orderbook[USDTCAD_ID].get_bids()[0]
+        btc_usdt_bid_price, btc_usdt_bid_qty = self.orderbook[BTCUSDT_ID].get_bids()[0]
 
-class NDAXTrader:
-    def __init__(self, session, trade_queue):
-        self.trade_queue
-        pass
+        # Trying to minimize computation
+        current_best = cash_available
+        current_ix = 0
 
-    async def run(self):
-        while True:
-            trades = await self.trade_queue.pop()
-            await self.handle_trades(trades)
+        t1_order = btc_cad_ask_qty * btc_cad_ask_price
 
-    async def handle_trades(self):
-        pass
+        if t1_order < current_best:
+            current_best = t1_order
+            current_ix = 1
 
-    async def handle_trades(self):
-        pass
+        t2_order = (
+            btc_usdt_bid_qty * btc_cad_ask_price / self.adjusted_single_trade_value
+        )
+        if t2_order < current_best:
+            current_best = t2_order
+            current_ix = 2
+
+        t3_order = (
+            usdt_cad_bid_qty
+            * btc_cad_ask_price
+            / (btc_usdt_bid_price * self.adjusted_single_trade_value ** 2)
+        )
+        if t3_order < current_best:
+            current_best = t3_order
+            current_ix = 3
+
+        return current_best, current_ix
 
 
-class TriangleMarketTrader:
-    def __init__(
-        self,
-        session,
-        message_queue,
-        triangle,
-        trade_lock,
-        min_value=0.01,
-        max_trade_vals=(500, 0.001, 500),
-    ):
-        self.session = session
-        self.triangle = triangle
-        self.logger = logging.getLogger(self.__class__.__name__)
+    def _get_backward_bottleneck_ix_and_cash_value(self, cash_available) -> Tuple[float, int]:
+        btc_cad_bid_price, btc_cad_bid_qty = self.orderbook[BTCCAD_ID].get_bids()[0]
+        usdt_cad_ask_price, usdt_cad_ask_qty = self.orderbook[USDTCAD_ID].get_asks()[0]
+        btc_usdt_ask_price, btc_usdt_ask_qty = self.orderbook[BTCUSDT_ID].get_asks()[0]
+        
 
-        self.trade_lock = trade_lock
+        current_best = cash_available
+        current_ix = 0
 
-    async def process(self):
-        """process
+        t1_order = usdt_cad_ask_qty * usdt_cad_ask_price
+        if t1_order < current_best:
+            current_best = t1_order
+            current_ix = 1
 
-        """
-        forward_val, forward_trade = self.triangle.forward()
-        backward_val, backward_trade = self.triangle.backward()
+        t2_order = btc_usdt_ask_qty * btc_usdt_ask_price * usdt_cad_ask_price / self.adjusted_single_trade_value
+        if t2_order < current_best:
+            current_best = t2_order
+            current_ix = 2
 
-        if forward_val > 1:
-            pass
+        t3_order = btc_cad_bid_qty * usdt_cad_ask_price * btc_usdt_ask_price / self.adjusted_single_trade_value ** 2
+        if t3_order < current_best:
+            current_best = t3_order
+            current_ix = 3
+        
+        return current_best, current_ix
 
-        if backward_val > 1:
-            pass
-
-    async def send_and_confirm(self, orders):
-        """send_and_confirm.
-
-        This will by default block until all orders are confirmed. Are we sure this is how we want to do it?
-
-        :param orders:
-        """
-        for order in orders:
-            await self.session.send(orders)
-
-            confirmation = await message_queue.pop()
-            self.handle_confirmation(confirmation)
