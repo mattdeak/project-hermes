@@ -82,6 +82,9 @@ class MultiOrderBook:
     def __getitem__(self, key):
         return self.book[key]
 
+    def __setitem__(self, key, value):
+        self.book[key] = value
+
     async def update(self, payload):
         async with self.updated:
             updates = [L2Update(*update) for update in payload]
@@ -106,6 +109,4 @@ class MultiOrderBook:
             try: # still not sure why we get delete orders for stuff not in our sights
                 book_to_update.pop(price)
             except KeyError as e:
-                print(f'Price not found {price}')
-
-        # await self.is_updated.clear()
+                pass # Happens because delete orders are sent irrespective of depth level
