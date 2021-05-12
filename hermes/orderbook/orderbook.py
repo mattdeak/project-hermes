@@ -22,7 +22,6 @@ L2Update = namedtuple(
 
 
 class AskSide(SortedDict):
-
     def __init__(self, depth, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.depth = depth
@@ -85,13 +84,15 @@ class MultiOrderBook:
     def __setitem__(self, key, value):
         self.book[key] = value
 
-    async def update(self, payload):
+        
+    async def update(self, payload, snapshot=False):
         async with self.updated:
             updates = [L2Update(*update) for update in payload]
             for update in updates:
                 self.handle_update(update)
 
-            self.updated.notify_all()
+            if not snapshot:
+                self.updated.notify_all()
 
     def handle_update(self, update):
         if update.Side == 0:

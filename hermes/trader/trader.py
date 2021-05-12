@@ -1,7 +1,6 @@
 import asyncio
 import logging
-from hermes.strategies.arbitrage.triangle import TriangleBTCUSDT
-from hermes.exchanges.ndax import create_request
+from hermes.exchanges.ndax import create_request, BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID
 from hermes.utils.structures import Order
 from uuid import uuid1
 from typing import List
@@ -59,6 +58,33 @@ class NDAXTrader:
     async def send_requests(self, requests):
         for req in requests:
             self.session.send(req)
+
+
+class NDAXMarketTriangleLogger(NDAXTrader):
+    def __init__(self, session, orderbook, triangle, cash, debug_mode=False):
+        super().__init__(session, orderbook)
+        self.triangle = triangle
+        self.cash = cash
+        self.debug_mode=debug_mode
+
+    async def run(self):
+        while True:
+            async with self.orderbook.updated:
+                await self.orderbook.updated.wait()
+
+                forward = self.triangle.forward_net(self.cash)
+                if forward > 0 or self.debug_mode:
+                    self.logger.info(f"Forward Arbitrage Opportunity: {forward}")
+                    self.logger.info(f"BTC_CAD: {self.orderbook[BTCCAD_ID].get_asks()[0]}")
+                    self.logger.info(f"BTC_USD: {self.orderbook[BTCUSDT_ID].get_bids()[0]}")
+                    self.logger.info(f"USDT_CAD: {self.orderbook[USDTCAD_ID].get_bids()[0]}")
+
+                backward = self.triangle.backward_net(self.cash)
+                if backward > 0 or self.debug_mode:
+                    self.logger.info(f"Backward Arbitrage Opportunity: {backward}")
+                    self.logger.info(f"USDT_CAD: {self.orderbook[USDTCAD_ID].get_asks()[0]}")
+                    self.logger.info(f"BTC_USD: {self.orderbook[BTCUSDT_ID].get_asks()[0]}")
+                    self.logger.info(f"BTC_CAD: {self.orderbook[BTCCAD_ID].get_bids()[0]}")
 
 
 class NDAXMarketTriangleTrader(NDAXTrader):

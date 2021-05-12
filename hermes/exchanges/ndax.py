@@ -169,8 +169,6 @@ class NDAXSession:
         pass
 
 
-with open(SECRET_PATH, "r") as secret_file:
-    data = json.load(secret_file)
 
 
 def parse_l2update(response):
@@ -302,7 +300,7 @@ def triangle_backward(
         return 1 / usdt_cad_ask / btc_usdt_ask * btc_cad_bid
 
 
-async def test():
+async def test(data):
     response = None
     session = NDAXSession(data["username"], data["password"], data["secret"])
     await session.initialize_session()
@@ -488,4 +486,6 @@ async def test():
 
 
 if __name__ == "__main__":
-    asyncio.run(test())
+    with open(SECRET_PATH, "r") as secret_file:
+        data = json.load(secret_file)
+    asyncio.run(test(data))
