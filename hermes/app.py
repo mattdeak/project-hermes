@@ -25,11 +25,11 @@ BOOK_DEPTH = 10
 class NDAXBot:
     def __init__(self, username, password, account_id):
         self.session = NDAXSession(username, password, None)
-        self.orderbook = MultiOrderBook(depth=BOOK_DEPTH, debug=True)
+        self.orderbook = MultiOrderBook(depth=BOOK_DEPTH, debug=False)
 
         triangle = TriangleBTCUSDTL1(self.orderbook)
         self.trader = NDAXDummyTriangleTrader(
-            self.session, self.orderbook, triangle, 1000, debug_mode=False
+            self.session, self.orderbook, triangle, 500, debug_mode=True
         )
         self.account = NDAXAccount(self.session, account_id)
         self.router = NDAXRouter(

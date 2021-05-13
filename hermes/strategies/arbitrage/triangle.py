@@ -46,6 +46,8 @@ class TriangleBTCUSDTL1:
         fee_adjustment = self.adjusted_single_trade_value
 
         throughput = self._get_forward_cash_throughput(cash_available)
+        if throughput < 0:
+            return None
 
         btc_cad_ask_price = self.orderbook[BTCCAD_ID].get_ask_prices()[0]
         btc_usdt_bid_price = self.orderbook[BTCUSDT_ID].get_bid_prices()[0]
@@ -94,6 +96,8 @@ class TriangleBTCUSDTL1:
         fee_adjustment = 1 - self.fees
 
         throughput = self._get_backward_cash_throughput(cash_available)
+        if throughput < 0:
+            return None
 
         usdt_cad_ask_price = self.orderbook[USDTCAD_ID].get_ask_prices()[0]
         btc_usdt_ask_price = self.orderbook[BTCUSDT_ID].get_ask_prices()[0]
