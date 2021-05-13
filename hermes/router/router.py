@@ -1,32 +1,64 @@
 import asyncio
 import json
+import logging
 
 BTCCAD_ID = 1
 BTCUSDT_ID = 82
 USDTCAD_ID = 80
 
+
+class UnhandledMessageException(Exception):
+    pass
+
+class ServerErrorMsg(Exception):
+    pass
+
+
 class NDAXRouter:
-    def __init__(self, session, orderbook, trader, sub_requests):
+
+    ACCOUNT_EVENTS = [
+        "AccountPositionEvent",
+        "CancelAllOrdersRejectEvent",
+        "CancelOrderRejectEvent",
+        "CancelReplaceOrderRejectEvent",
+        "MarketStatusUpdate",
+        "NewOrderRejectEvent",
+        "OrderStateEvent",
+        "OrderTradeEvent",
+        "PendingDepositUpdate",
+    ]
+
+    def __init__(self, session, account, orderbook, trader):
+        self.account = account
         self.session = session
         self.orderbook = orderbook
         self.trader = trader
-        self.sub_requests = sub_requests
+        self.logger = logging.getLogger(self.__class__.__name__)
 
-        asyncio.run(self.run())
+    async def route(self, raw_message):
+        message = json.loads(raw_message)
+
+        message_fn = message["n"]
+        payload = json.loads(message['o'])
+        if message_fn == "SubscribeLevel2":  # Should update order book
+            await self.orderbook.update(payload)
+
+        elif message_fn == "Level2UpdateEvent":
+            await self.orderbook.update(payload)
+            await self.trader.recheck_orderbook_and_trade()
+
+        elif message_fn == "GetAccountPositions":
+            await self.account.process_account_positions(payload)
+
+        elif message_fn == "OrderTradeEvent":  # Trade confirmation
+            await self.trader.handle_trade_event(payload)  # TODO: Implement
+
+        elif message_fn == 'SubscribeAccountEvents':
+            if not payload['Subscribed']:
+                raise ServerErrorMsg('Subscription to Account Events Failed')
+            else:
+                self.logger.info('Account Events Succesfully Subscribed')
 
 
-    async def run(self):
-        for sub_request in self.sub_requests:
-            self.session.send(sub_request)
-
-        async for raw_message in self.session.session:
-            message = json.loads(raw_message)
-
-            if message['n'] == '': # Should update order book
-                payload = json.loads(message['o'])
-                await self.orderbook.update(payload)
-            
-            if message['n'] == '': # Trade confirmation
-                self.trader.handle_response(message)
-            
-
+        else:
+            raise UnhandledMessageException(f"Message type not handled: {message_fn}")

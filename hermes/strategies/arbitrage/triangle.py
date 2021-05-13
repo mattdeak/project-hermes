@@ -6,8 +6,10 @@ from hermes.utils.structures import Order
 from typing import Tuple
 from functools import lru_cache
 
-OrderbookLine = namedtuple("OrderbookLine", ["price", "quantity"])
-Instrument = namedtuple("Instrument", ["bid", "ask"])
+SIDE_BUY = 0
+SIDE_SELL = 1
+
+ORDER_TYPE_MARKET = 1
 
 
 class TriangleBTCUSDTL1:
@@ -30,7 +32,7 @@ class TriangleBTCUSDTL1:
         )
 
     def forward_net(self, cash_available):
-        value, _ = self._get_forward_bottleneck_ix_and_cash_value(cash_available)
+        value = self._get_forward_cash_throughput(cash_available)
         multiplier = self.forward()
         return (multiplier - 1) * value
 
@@ -43,35 +45,36 @@ class TriangleBTCUSDTL1:
         # Aliases
         fee_adjustment = self.adjusted_single_trade_value
 
-        ix, trade_value = self._get_forward_bottleneck_ix_and_cash_value(cash_available)
-        btc_cad_ask_price, btc_cad_ask_qty = self.orderbook[BTCCAD_ID].get_asks()[0]
-        btc_usdt_bid_price, btc_usdt_bid_qty = self.orderbook[BTCUSDT_ID].get_bids()[0]
-        usdt_cad_bid_price, usdt_cad_bid_qty = self.orderbook[USDTCAD_ID].get_bids()[0]
+        throughput = self._get_forward_cash_throughput(cash_available)
 
-        if ix == 0:  # Cash bottleneck
-            order1_qty = cash_available / btc_cad_ask_price
-            order2_qty = cash_available / btc_cad_ask_price * fee_adjustment
-            order3_qty = (
-                cash_available
-                / btc_cad_ask_price
-                * btc_usdt_bid_price
-                * fee_adjustment ** 2
-            )
+        btc_cad_ask_price = self.orderbook[BTCCAD_ID].get_ask_prices()[0]
+        btc_usdt_bid_price = self.orderbook[BTCUSDT_ID].get_bid_prices()[0]
+        usdt_cad_bid_price = self.orderbook[USDTCAD_ID].get_bid_prices()[0]
 
-        elif ix == 1:  # BTC Ask bottleneck
-            order1_qty = btc_cad_ask_qty
-            order2_qty = btc_cad_ask_qty * fee_adjustment
-            order3_qty = btc_cad_ask_qty * btc_usdt_bid_price * fee_adjustment ** 2
+        order1_qty = throughput / btc_cad_ask_price
+        order2_qty = order1_qty * fee_adjustment
+        order3_qty = order2_qty * btc_usdt_bid_price
 
-        elif ix == 2:  # BTC Bid Bottleneck
-            order1_qty = btc_usdt_bid_qty / fee_adjustment
-            order2_qty = btc_usdt_bid_qty
-            order3_qty = btc_usdt_bid_qty * btc_usdt_bid_price * fee_adjustment
+        order1 = Order(
+            instrument_id=BTCCAD_ID,
+            side=0,
+            quantity=order1_qty,
+            order_type=ORDER_TYPE_MARKET,
+        )
+        order2 = Order(
+            instrument_id=BTCUSDT_ID,
+            side=1,
+            quantity=order2_qty,
+            order_type=ORDER_TYPE_MARKET,
+        )
+        order3 = Order(
+            instrument_id=USDTCAD_ID,
+            side=1,
+            quantity=order3_qty,
+            order_type=ORDER_TYPE_MARKET,
+        )
 
-        elif ix == 3:  # USDT Bid Bottleneck
-            order1_qty = usdt_cad_bid_qty * usdt_cad_bid_price
-
-        return (order1_qty, order2_qty, order3_qty)
+        return (order1, order2, order3)
 
     def backward(self):
         return (
@@ -82,30 +85,46 @@ class TriangleBTCUSDTL1:
         ) * self.triangle_value_multiplier
 
     def backward_net(self, cash_available):
-        value, _ = self._get_backward_bottleneck_ix_and_cash_value(cash_available)
+        value = self._get_backward_cash_throughput(cash_available)
         multiplier = self.backward()
 
         return (multiplier - 1) * value
 
-
     def get_backward_orders(self, cash_available):
         fee_adjustment = 1 - self.fees
-        squared_fee_adjustment = (1 / self.fees) ** 2
 
-        btc_cad_bid_qty = self.btc_cad.bid.quantity
-        btc_usdt_ask_qty = self.btc_usdt.ask.quantity
-        usdt_cad_ask_qty = self.usdt_cad.ask.quantity
+        throughput = self._get_backward_cash_throughput(cash_available)
 
-        btc_cad_bid_price = self.btc_cad.bid.price
-        btc_usdt_ask_price = self.btc_usdt.ask.price
-        usdt_cad_ask_price = self.usdt_cad.ask.price
+        usdt_cad_ask_price = self.orderbook[USDTCAD_ID].get_ask_prices()[0]
+        btc_usdt_ask_price = self.orderbook[BTCUSDT_ID].get_ask_prices()[0]
+        btc_cad_bid_price = self.orderbook[BTCCAD_ID].get_bid_prices()[0]
 
-        # TODO: Implement backward orders
-        pass
+        order1_qty = throughput / usdt_cad_ask_price
+        order2_qty = order1_qty / btc_usdt_ask_price * fee_adjustment
+        order3_qty = order2_qty * fee_adjustment
 
-    def _get_forward_bottleneck_ix_and_cash_value(
-        self, cash_available
-    ) -> Tuple[float, int]:
+        order1 = Order(
+            instrument_id=USDTCAD_ID,
+            side=0,
+            quantity=order1_qty,
+            order_type=ORDER_TYPE_MARKET,
+        )
+        order2 = Order(
+            instrument_id=BTCUSDT_ID,
+            side=0,
+            quantity=order2_qty,
+            order_type=ORDER_TYPE_MARKET,
+        )
+        order3 = Order(
+            instrument_id=BTCCAD_ID,
+            side=1,
+            quantity=order3_qty,
+            order_type=ORDER_TYPE_MARKET,
+        )
+
+        return (order1, order2, order3)
+
+    def _get_forward_cash_throughput(self, cash_available) -> float:
         # Gets the L1 tradethrough value in cash amounts
         # and provides the trade_ix, which can be used to efficiently
         # get the trade orders
@@ -115,20 +134,17 @@ class TriangleBTCUSDTL1:
 
         # Trying to minimize computation
         current_best = cash_available
-        current_ix = 0
 
         t1_order = btc_cad_ask_qty * btc_cad_ask_price
 
         if t1_order < current_best:
             current_best = t1_order
-            current_ix = 1
 
         t2_order = (
             btc_usdt_bid_qty * btc_cad_ask_price / self.adjusted_single_trade_value
         )
         if t2_order < current_best:
             current_best = t2_order
-            current_ix = 2
 
         t3_order = (
             usdt_cad_bid_qty
@@ -137,34 +153,36 @@ class TriangleBTCUSDTL1:
         )
         if t3_order < current_best:
             current_best = t3_order
-            current_ix = 3
 
-        return current_best, current_ix
+        return current_best
 
-
-    def _get_backward_bottleneck_ix_and_cash_value(self, cash_available) -> Tuple[float, int]:
+    def _get_backward_cash_throughput(self, cash_available) -> float:
         btc_cad_bid_price, btc_cad_bid_qty = self.orderbook[BTCCAD_ID].get_bids()[0]
         usdt_cad_ask_price, usdt_cad_ask_qty = self.orderbook[USDTCAD_ID].get_asks()[0]
         btc_usdt_ask_price, btc_usdt_ask_qty = self.orderbook[BTCUSDT_ID].get_asks()[0]
-        
 
         current_best = cash_available
-        current_ix = 0
 
         t1_order = usdt_cad_ask_qty * usdt_cad_ask_price
         if t1_order < current_best:
             current_best = t1_order
-            current_ix = 1
 
-        t2_order = btc_usdt_ask_qty * btc_usdt_ask_price * usdt_cad_ask_price / self.adjusted_single_trade_value
+        t2_order = (
+            btc_usdt_ask_qty
+            * btc_usdt_ask_price
+            * usdt_cad_ask_price
+            / self.adjusted_single_trade_value
+        )
         if t2_order < current_best:
             current_best = t2_order
-            current_ix = 2
 
-        t3_order = btc_cad_bid_qty * usdt_cad_ask_price * btc_usdt_ask_price / self.adjusted_single_trade_value ** 2
+        t3_order = (
+            btc_cad_bid_qty
+            * usdt_cad_ask_price
+            * btc_usdt_ask_price
+            / self.adjusted_single_trade_value ** 2
+        )
         if t3_order < current_best:
             current_best = t3_order
-            current_ix = 3
-        
-        return current_best, current_ix
 
+        return current_best

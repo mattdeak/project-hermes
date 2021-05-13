@@ -13,9 +13,11 @@ BACKWARD = 1
 class NDAXTrader:
     def __init__(self, session, orderbook):
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.session = session
         self.orderbook = orderbook
         self.outstanding_trades = []
         self.current_trade_id = 1
+        self.trade_lock = False
 
     async def run(self):
         pass
@@ -25,7 +27,7 @@ class NDAXTrader:
         for order in orders:
             trade_id = self.create_trade_id()
             payload = {
-                "InstrumentId": order.InstrumentId,
+                "InstrumentId": order.instrument_id,
                 "OMDId": 1,
                 "AccountId": 1,  # TODO: Get the real one
                 "TimeInForce": order.time_in_force,
@@ -65,7 +67,7 @@ class NDAXMarketTriangleLogger(NDAXTrader):
         super().__init__(session, orderbook)
         self.triangle = triangle
         self.cash = cash
-        self.debug_mode=debug_mode
+        self.debug_mode = debug_mode
 
     async def run(self):
         while True:
@@ -75,43 +77,87 @@ class NDAXMarketTriangleLogger(NDAXTrader):
                 forward = self.triangle.forward_net(self.cash)
                 if forward > 0 or self.debug_mode:
                     self.logger.info(f"Forward Arbitrage Opportunity: {forward}")
-                    self.logger.info(f"BTC_CAD: {self.orderbook[BTCCAD_ID].get_asks()[0]}")
-                    self.logger.info(f"BTC_USD: {self.orderbook[BTCUSDT_ID].get_bids()[0]}")
-                    self.logger.info(f"USDT_CAD: {self.orderbook[USDTCAD_ID].get_bids()[0]}")
+                    self.logger.info(
+                        f"BTC_CAD: {self.orderbook[BTCCAD_ID].get_asks()[0]}"
+                    )
+                    self.logger.info(
+                        f"BTC_USD: {self.orderbook[BTCUSDT_ID].get_bids()[0]}"
+                    )
+                    self.logger.info(
+                        f"USDT_CAD: {self.orderbook[USDTCAD_ID].get_bids()[0]}"
+                    )
 
                 backward = self.triangle.backward_net(self.cash)
                 if backward > 0 or self.debug_mode:
                     self.logger.info(f"Backward Arbitrage Opportunity: {backward}")
-                    self.logger.info(f"USDT_CAD: {self.orderbook[USDTCAD_ID].get_asks()[0]}")
-                    self.logger.info(f"BTC_USD: {self.orderbook[BTCUSDT_ID].get_asks()[0]}")
-                    self.logger.info(f"BTC_CAD: {self.orderbook[BTCCAD_ID].get_bids()[0]}")
+                    self.logger.info(
+                        f"USDT_CAD: {self.orderbook[USDTCAD_ID].get_asks()[0]}"
+                    )
+                    self.logger.info(
+                        f"BTC_USD: {self.orderbook[BTCUSDT_ID].get_asks()[0]}"
+                    )
+                    self.logger.info(
+                        f"BTC_CAD: {self.orderbook[BTCCAD_ID].get_bids()[0]}"
+                    )
 
 
 class NDAXMarketTriangleTrader(NDAXTrader):
-    def __init__(self, session, orderbook, triangle, min_trade_value=0.2):
+    def __init__(
+        self,
+        session,
+        orderbook,
+        triangle,
+        cash_available,
+        min_trade_value=0.2,
+        debug_mode=False,
+    ):
         super().__init__(session, orderbook)
         self.triangle = triangle
         self.min_trade_value = min_trade_value
+        self.cash_available = cash_available
+        self.debug_mode = debug_mode
 
-    async def run(self):
-        while True:
-            async with self.orderbook.updated:
-                await self.orderbook.updated.wait()
+    async def recheck_orderbook_and_trade(self):
+        if self.trade_lock:
+            return
 
-                if self.triangle.forward_value() > self.min_trade_value:
-                    orders = self.triangle.get_forward_orders()
+        orders = None
+        if (
+            self.triangle.forward_net(self.cash_available) > self.min_trade_value
+            or self.debug_mode
+        ):
+            orders = self.triangle.get_forward_orders(self.cash_available)
 
-                elif self.triangle.backward_value() > self.min_trade_value:
-                    orders = self.triangle.get_backward_orders()
+        elif self.triangle.backward_net(self.cash_available) > self.min_trade_value:
+            orders = self.triangle.get_backward_orders(self.cash_available)
 
-                requests = self.format_requests(orders)
+        if not orders:
+            return
 
-                for req in requests:
-                    await self.session.send(req)
+        if self.debug_mode:
+            for i, order in enumerate(orders):
+                self.logger.info(f"Order {i}: {order}")
+
+        requests = self.format_requests(orders)
+        await self.send_requests(requests)
+
+        self.trade_lock = True
+
+    async def validate_orders(self, orders):
+        pass
+
+    async def update_account_quantities(self):
+        pass
 
 
 class NDAXDummyTriangleTrader(NDAXMarketTriangleTrader):
+    async def release_trade_lock(self):
+        await asyncio.sleep(0.5)
+        self.trade_lock = False
+
     async def send_requests(self, requests):
         for request in requests:
             await asyncio.sleep(0.001)
-            self.logger.info(f"Would have sent request: {requests}")
+            self.logger.info(f"Would have sent request: {request}")
+
+        asyncio.create_task(self.release_trade_lock())
