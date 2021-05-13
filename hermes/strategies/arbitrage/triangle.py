@@ -53,7 +53,7 @@ class TriangleBTCUSDTL1:
 
         order1_qty = throughput / btc_cad_ask_price
         order2_qty = order1_qty * fee_adjustment
-        order3_qty = order2_qty * btc_usdt_bid_price
+        order3_qty = order2_qty * btc_usdt_bid_price * fee_adjustment
 
         order1 = Order(
             instrument_id=BTCCAD_ID,
