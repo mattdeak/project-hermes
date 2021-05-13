@@ -5,6 +5,7 @@ from hermes.utils.structures import Order
 from uuid import uuid1
 from typing import List
 from dataclasses import dataclass
+from math import floor
 
 FORWARD = 0
 BACKWARD = 1
@@ -35,7 +36,7 @@ class NDAXTrader:
                 "OrderIdOCO": 0,
                 "UseDisplayQuantity": False,
                 "Side": order.side,
-                "Quantity": order.quantity,
+                "Quantity": round(order.quantity, 6),
                 "OrderType": order.order_type,
                 "PegPriceType": 1,
                 "LimitPrice": order.limit_price,
@@ -48,7 +49,7 @@ class NDAXTrader:
         self.outstanding_trades.append(self.current_trade_id)
         return self.current_trade_id
 
-    async def handle_response(self, response):
+    async def handle_trade_event(self, response):
         print(response)
         if response["n"] == "SendOrder":
             pass  # TODO: Determine if order was a success
@@ -108,34 +109,41 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         orderbook,
         triangle,
         cash_available,
-        min_trade_value=0.2,
+        min_trade_value=0.1,
         debug_mode=False,
+        sequential=False,
     ):
         super().__init__(session, orderbook)
         self.triangle = triangle
         self.min_trade_value = min_trade_value
         self.cash_available = cash_available
         self.debug_mode = debug_mode
+        self.sequential = sequential
+        self.pending_orders = []
+        self.trade_lock = False
 
     async def recheck_orderbook_and_trade(self):
         if self.trade_lock:
             return
 
         orders = None
-        if (forward_val := self.triangle.forward_net(self.cash_available)) > self.min_trade_value:
+        forward_val = self.triangle.forward_net(self.cash_available)
+        if forward_val > self.min_trade_value:
             orders = self.triangle.get_forward_orders(self.cash_available)
 
-        elif (backward_val := self.triangle.backward_net(self.cash_available)) > self.min_trade_value:
-            orders = self.triangle.get_backward_orders(self.cash_available)
+        else:
+            backward_val = self.triangle.backward_net(self.cash_available)
+            if backward_val > self.min_trade_value:
+                orders = self.triangle.get_backward_orders(self.cash_available)
 
         if not orders:
             return
 
         if self.debug_mode:
-            if forward_val > backward_val:
-                self.logger.info(f'Forward: Opportunity Detected Worth {forward_val}')
+            if forward_val:
+                self.logger.info(f"Forward: Opportunity Detected Worth {forward_val}")
             else:
-                self.logger.info(f'Backward: Opportunity Detected Worth {backward_val}')
+                self.logger.info(f"Backward: Opportunity Detected Worth {backward_val}")
 
             for i, order in enumerate(orders):
                 self.logger.info(f"Order {i}: {order}")
@@ -147,11 +155,39 @@ class NDAXMarketTriangleTrader(NDAXTrader):
 
         self.trade_lock = True
 
-    async def validate_orders(self, orders):
-        pass
+    async def send_requests(self, requests):
+        if self.sequential:
+            # Send the first order, queue the other 2
+            self.pending_orders += requests[1:]
+            await self.session.send(requests[0])
+        else:
+            for req in requests:
+                await self.session.send(req)
 
-    async def update_account_quantities(self):
-        pass
+    async def handle_trade_event(self, event_payload):
+        client_id = event_payload["ClientOrderId"]
+        quantity = event_payload["Quantity"]
+        price = event_payload["Price"]
+        side = event_payload["Side"]
+        instrument_id = event_payload["InstrumentId"]
+        value = event_payload["Value"]
+
+        if side == 0:
+            self.logger.info(
+                f"Bought {instrument_id}: {quantity} at {price}. Value: {value}"
+            )
+            # TODO: Look up buy/sell sides
+        else:
+            self.logger.info(
+                f"Sold {instrument_id}: {quantity} at {price}. Value: {value}"
+            )
+
+        if self.sequential:
+            next_request = self.pending_orders.pop()
+            await self.session.send(next_request)
+
+        if len(self.pending_orders) == 0:
+            self.trade_lock = False
 
 
 class NDAXDummyTriangleTrader(NDAXMarketTriangleTrader):
