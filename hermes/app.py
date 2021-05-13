@@ -7,7 +7,7 @@ from hermes.exchanges.ndax import (
 )
 from hermes.orderbook.orderbook import MultiOrderBook
 from hermes.strategies.arbitrage.triangle import TriangleBTCUSDTL1
-from hermes.trader.trader import NDAXDummyTriangleTrader
+from hermes.trader.trader import NDAXMarketTriangleTrader
 from hermes.exchanges.ndax import create_request
 from hermes.account.ndax import NDAXAccount
 from hermes.router.router import NDAXRouter
@@ -23,13 +23,14 @@ BOOK_DEPTH = 10
 
 
 class NDAXBot:
-    def __init__(self, username, password, account_id):
-        self.session = NDAXSession(username, password, None)
+    def __init__(self, user_id, api_key, secret, account_id, orderbook_print_interval=5):
+        self.session = NDAXSession(user_id, api_key, secret)
         self.orderbook = MultiOrderBook(depth=BOOK_DEPTH, debug=False)
+        self.orderbook_print_interval = orderbook_print_interval
 
         triangle = TriangleBTCUSDTL1(self.orderbook)
-        self.trader = NDAXDummyTriangleTrader(
-            self.session, self.orderbook, triangle, 500, debug_mode=True
+        self.trader = NDAXMarketTriangleTrader(
+            self.session, self.orderbook, triangle, 50, debug_mode=True, min_trade_value=0.01, sequential=True
         )
         self.account = NDAXAccount(self.session, account_id)
         self.router = NDAXRouter(
@@ -37,9 +38,17 @@ class NDAXBot:
         )
 
     def start(self):
-        asyncio.run(self.__run__())
+        asyncio.run(self.start_all_tasks())
 
-    async def __run__(self):
+    async def start_all_tasks(self):
+        tasks = [self.main_loop()]
+        if self.orderbook_print_interval:
+            tasks.append(self.orderbook_update_loop())
+
+        await asyncio.gather(*tasks)
+
+
+    async def main_loop(self):
         # Initialize session
         await self.session.initialize_session()
         await self.session.authenticate()
@@ -53,7 +62,18 @@ class NDAXBot:
         async for message in self.session.session:
             await self.router.route(message)
 
-    async def refresh_session(self):
+    async def orderbook_update_loop(self):
+        while True:
+            self.orderbook.print_orderbook()
+            print('-------')
+            await asyncio.sleep(self.orderbook_print_interval*60)
+
+    async def refresh_session(self, mins_until_refresh=30):
+        seconds_until_refresh = mins_until_refresh*60
+        while True:
+            await asyncio.sleep(seconds_until_refresh)
+            await self.session.refresh()
+
         raise NotImplementedError()
 
     async def reset(self):
@@ -75,5 +95,5 @@ if __name__ == "__main__":
 
     with open("secrets/ndax.json", "r") as sfile:
         data = json.load(sfile)
-    bot = NDAXBot(data["username"], data["password"], data['account_id'])
+    bot = NDAXBot(data["user_id"], data["api_key"], data['secret'], data['account_id'])
     bot.start()
