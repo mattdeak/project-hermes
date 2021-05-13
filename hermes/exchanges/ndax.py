@@ -1,7 +1,6 @@
 import asyncio
 import json
 import websockets
-import requests
 import random
 from enum import Enum
 import logging
@@ -9,6 +8,7 @@ import uuid
 from collections import namedtuple
 import datetime
 import traceback
+from hermes.utils.authorization import create_NDAX_signature
 
 SECRET_PATH = "secrets/ndax.json"
 NDAX_URL = "wss://api.ndax.io"
@@ -88,16 +88,24 @@ def create_subscribe_level2_req(instrument_id: int, depth=5) -> str:
 
 
 class NDAXAuth:
-    def __init__(self, username, password):
-        self.username = username
-        self.password = password
+    def __init__(self, user_id, api_key, secret):
+        self.user_id = user_id
+        self.api_key = api_key
+        self.secret = secret
 
     def get_authenticate_user_request(self):
-        return create_request(
-            MESSAGE_TYPES["REQUEST"],
-            "AuthenticateUser",
-            {"username": self.username, "password": self.password},
+        signature, nonce = create_NDAX_signature(
+            self.user_id, self.api_key, self.secret
         )
+
+        payload = {
+            "APIKey": self.api_key,
+            "Signature": signature,
+            "UserId": str(self.user_id),
+            "Nonce": str(nonce),
+        }
+        request = create_request(0, "AuthenticateUser", payload=payload)
+        return request
 
     def get_authenticate_2fa_request(self, code):
         return create_request(
@@ -105,9 +113,10 @@ class NDAXAuth:
         )
 
 
+
 class NDAXSession:
-    def __init__(self, username, password, apikey):
-        self.auth_manager = NDAXAuth(username, password)
+    def __init__(self, user_id, apikey, secret):
+        self.auth_manager = NDAXAuth(user_id, apikey, secret)
         self.logger = logging.getLogger(self.__class__.__name__)
 
     async def initialize_session(self):
@@ -155,4 +164,3 @@ class NDAXSession:
             return payload["SessionToken"]
         else:
             raise MFAError(f"MFA Failed: {payload}")
-
