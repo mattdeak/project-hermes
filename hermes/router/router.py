@@ -51,13 +51,19 @@ class NDAXRouter:
             await self.account.process_account_positions(payload)
 
         elif message_fn == "OrderTradeEvent":  # Trade confirmation
-            await self.trader.handle_trade_event(payload)  # TODO: Implement
+            await self.trader.handle_trade_event(payload) 
 
         elif message_fn == 'SubscribeAccountEvents':
             if not payload['Subscribed']:
                 raise ServerErrorMsg('Subscription to Account Events Failed')
             else:
-                self.logger.info('Account Events Succesfully Subscribed')
+                self.logger.info('Account Events Successfully Subscribed')
+
+        elif message_fn == 'DepositTicketUpdateEvent':
+            self.logger.info(f'Deposit Ticket Event: {payload}')
+
+        elif message_fn in NDAXRouter.ACCOUNT_EVENTS:
+            self.logger.warning(f'Unhandled account message. Not stopping op: {message_fn}')
 
 
         else:
