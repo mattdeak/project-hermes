@@ -122,21 +122,25 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             return
 
         orders = None
-        if (
-            self.triangle.forward_net(self.cash_available) > self.min_trade_value
-            or self.debug_mode
-        ):
+        if (forward_val := self.triangle.forward_net(self.cash_available)) > self.min_trade_value:
             orders = self.triangle.get_forward_orders(self.cash_available)
 
-        elif self.triangle.backward_net(self.cash_available) > self.min_trade_value:
+        elif (backward_val := self.triangle.backward_net(self.cash_available)) > self.min_trade_value:
             orders = self.triangle.get_backward_orders(self.cash_available)
 
         if not orders:
             return
 
         if self.debug_mode:
+            if forward_val > backward_val:
+                self.logger.info(f'Forward: Opportunity Detected Worth {forward_val}')
+            else:
+                self.logger.info(f'Backward: Opportunity Detected Worth {backward_val}')
+
             for i, order in enumerate(orders):
                 self.logger.info(f"Order {i}: {order}")
+
+            self.orderbook.print_orderbook()
 
         requests = self.format_requests(orders)
         await self.send_requests(requests)

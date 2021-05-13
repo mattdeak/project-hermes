@@ -3,6 +3,7 @@ from asyncio import Condition
 from dataclasses import dataclass
 from sortedcontainers import SortedDict, SortedItemsView
 from collections import namedtuple
+import logging
 
 L2Update = namedtuple(
     "L2Update",
@@ -31,6 +32,7 @@ class AskSide(SortedDict):
         if len(self) > self.depth:
             self.popitem(-1)
 
+
 class BidSide(SortedDict):
     def __init__(self, depth, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -40,6 +42,7 @@ class BidSide(SortedDict):
         super().__setitem__(key, value)
         if len(self) > self.depth:
             self.popitem(0)
+
 
 class OrderBook:
     def __init__(self, depth):
@@ -52,27 +55,27 @@ class OrderBook:
 
         self.ask_prices = self.ask.keys()
         self.bid_prices = self.bid.keys()
-    
+
     def get_bids(self):
-        return self.bid_depth_view[:-self.depth-1:-1]
+        return self.bid_depth_view[: -self.depth - 1 : -1]
 
     def get_asks(self):
-        return self.ask_depth_view[:self.depth]
+        return self.ask_depth_view[: self.depth]
 
     def get_ask_prices(self):
-        return self.ask_prices[:self.depth]
+        return self.ask_prices[: self.depth]
 
     def get_bid_prices(self):
-        return self.bid_prices[:-self.depth-1:-1]
-        
+        return self.bid_prices[: -self.depth - 1 : -1]
+
 
 class MultiOrderBook:
-    def __init__(self, instrument_ids=(1, 80, 82), depth=5):
-        self.updated = Condition()
-
+    def __init__(self, instrument_ids=(1, 80, 82), depth=5, debug=False):
         self.book = {}
         self.initialize_book(instrument_ids, depth)
         self.depth = depth
+        self.debug = debug
+        self.logger = logging.getLogger(self.__class__.__name__)
 
     def initialize_book(self, instrument_ids, depth):
         for _id in instrument_ids:
@@ -84,15 +87,21 @@ class MultiOrderBook:
     def __setitem__(self, key, value):
         self.book[key] = value
 
-        
-    async def update(self, payload, snapshot=False):
-        async with self.updated:
-            updates = [L2Update(*update) for update in payload]
-            for update in updates:
-                self.handle_update(update)
+    async def update(self, payload):
+        for update in payload:
+            self.handle_update(L2Update(*update))
 
-            if not snapshot:
-                self.updated.notify_all()
+        if self.debug:
+            self.print_orderbook(depth=1)
+
+    def print_orderbook(self, depth=1):
+        for k, v in self.book.items():
+            try:
+                self.logger.info(f'{k}: ASK:{v.get_asks()[:depth]}')
+                self.logger.info(f'{k}: BID:{v.get_bids()[:depth]}')
+            except IndexError:
+                pass
+
 
     def handle_update(self, update):
         if update.Side == 0:
@@ -100,14 +109,14 @@ class MultiOrderBook:
         elif update.Side == 1:
             book_to_update = self.book[update.ProductPairCode].ask
         else:
-            print('What the fuck is this')
+            print("What the fuck is this")
 
         price = update.Price
         quantity = update.Quantity
         if update.ActionType < 2:
             book_to_update[price] = quantity
         else:
-            try: # still not sure why we get delete orders for stuff not in our sights
+            try:  # still not sure why we get delete orders for stuff not in our sights
                 book_to_update.pop(price)
             except KeyError as e:
-                pass # Happens because delete orders are sent irrespective of depth level
+                pass  # Happens because delete orders are sent irrespective of depth level
