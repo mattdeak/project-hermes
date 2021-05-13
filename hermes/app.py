@@ -7,46 +7,73 @@ from hermes.exchanges.ndax import (
 )
 from hermes.orderbook.orderbook import MultiOrderBook
 from hermes.strategies.arbitrage.triangle import TriangleBTCUSDTL1
-from hermes.trader.trader import NDAXMarketTriangleLogger
+from hermes.trader.trader import NDAXDummyTriangleTrader
+from hermes.exchanges.ndax import create_request
+from hermes.account.ndax import NDAXAccount
+from hermes.router.router import NDAXRouter
 import asyncio
 import json
+import logging
+
+logging.basicConfig()
 
 
-async def listen(session, orderbook):
-    counter = 0
-    req1 = create_subscribe_level2_req(BTCCAD_ID, depth=1)
-    req2 = create_subscribe_level2_req(BTCUSDT_ID, depth=1)
-    req3 = create_subscribe_level2_req(USDTCAD_ID, depth=1)
-
-    await session.send(req1)
-    await session.send(req2)
-    await session.send(req3)
-
-    async for message in session.session:
-
-        parsed = json.loads(message)
-        message_type = parsed["n"]
-        payload = json.loads(json.loads(message)["o"])
-        await orderbook.update(payload, snapshot=(message_type == "SubscribeLevel2"))
+# TODO: Create config file for this stuff
+BOOK_DEPTH = 10 
 
 
-async def main(username, password):
-    session = NDAXSession(username, password, None)
+class NDAXBot:
+    def __init__(self, username, password, account_id):
+        self.session = NDAXSession(username, password, None)
+        self.orderbook = MultiOrderBook(depth=BOOK_DEPTH, debug=True)
 
-    await session.initialize_session()
-    await session.authenticate()
+        triangle = TriangleBTCUSDTL1(self.orderbook)
+        self.trader = NDAXDummyTriangleTrader(
+            self.session, self.orderbook, triangle, 1000, debug_mode=False
+        )
+        self.account = NDAXAccount(self.session, account_id)
+        self.router = NDAXRouter(
+            self.session, self.account, self.orderbook, self.trader
+        )
 
-    orderbook = MultiOrderBook(depth=1)
-    triangle = TriangleBTCUSDTL1(orderbook)
-    trader = NDAXMarketTriangleLogger(
-        session, orderbook, triangle, 1500, debug_mode=False
-    )
+    def start(self):
+        asyncio.run(self.__run__())
 
-    await asyncio.gather(listen(session, orderbook), trader.run())
+    async def __run__(self):
+        # Initialize session
+        await self.session.initialize_session()
+        await self.session.authenticate()
+
+        await self.account.request_account_update()
+
+        sub_requests = self.get_sub_requests()
+        for request in sub_requests:
+            await self.session.send(request)
+
+        async for message in self.session.session:
+            await self.router.route(message)
+
+    async def refresh_session(self):
+        raise NotImplementedError()
+
+    async def reset(self):
+        pass
+
+    def get_sub_requests(self):
+        req1 = create_subscribe_level2_req(BTCCAD_ID, depth=BOOK_DEPTH)
+        req2 = create_subscribe_level2_req(BTCUSDT_ID, depth=BOOK_DEPTH)
+        req3 = create_subscribe_level2_req(USDTCAD_ID, depth=BOOK_DEPTH)
+        req4 = create_request(0, 'SubscribeAccountEvents', {'OMSId': 1, 'AccountId': self.account.account_id})
+
+        return req1, req2, req3, req4
+
+    def get_unsub_requests(self):
+        pass
 
 
 if __name__ == "__main__":
 
     with open("secrets/ndax.json", "r") as sfile:
         data = json.load(sfile)
-    asyncio.run(main(data["username"], data["password"]))
+    bot = NDAXBot(data["username"], data["password"], data['account_id'])
+    bot.start()
