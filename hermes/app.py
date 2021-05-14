@@ -19,7 +19,7 @@ logging.basicConfig()
 
 
 # TODO: Create config file for this stuff
-BOOK_DEPTH = 10 
+BOOK_DEPTH = 3 
 
 
 class NDAXBot:
@@ -30,7 +30,7 @@ class NDAXBot:
 
         triangle = TriangleBTCUSDTL1(self.orderbook)
         self.trader = NDAXMarketTriangleTrader(
-            self.session, self.orderbook, triangle, 50, debug_mode=True, min_trade_value=0.01, sequential=True
+            self.session, self.orderbook, account_id, triangle, 50, debug_mode=True, min_trade_value=0.01, sequential=True
         )
         self.account = NDAXAccount(self.session, account_id)
         self.router = NDAXRouter(
@@ -92,7 +92,6 @@ class NDAXBot:
 
 
 if __name__ == "__main__":
-
     with open("secrets/ndax.json", "r") as sfile:
         data = json.load(sfile)
     bot = NDAXBot(data["user_id"], data["api_key"], data['secret'], data['account_id'])

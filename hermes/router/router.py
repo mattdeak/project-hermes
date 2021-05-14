@@ -41,6 +41,7 @@ class NDAXRouter:
         message_fn = message["n"]
         payload = json.loads(message['o'])
         if message_fn == "SubscribeLevel2":  # Should update order book
+            self.logger.info('Subscription Message Received')
             await self.orderbook.update(payload)
 
         elif message_fn == "Level2UpdateEvent":
@@ -61,6 +62,9 @@ class NDAXRouter:
 
         elif message_fn == 'DepositTicketUpdateEvent':
             self.logger.info(f'Deposit Ticket Event: {payload}')
+
+        elif message_fn == 'SendOrder':
+            self.logger.info(f'SendOrder Response: {message}')
 
         elif message_fn in NDAXRouter.ACCOUNT_EVENTS:
             self.logger.warning(f'Unhandled account message. Not stopping op: {message_fn}')
