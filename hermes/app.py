@@ -19,18 +19,19 @@ logging.basicConfig()
 
 
 # TODO: Create config file for this stuff
-BOOK_DEPTH = 3 
+BOOK_DEPTH = 5 
 
 
 class NDAXBot:
-    def __init__(self, user_id, api_key, secret, account_id, orderbook_print_interval=5):
+    def __init__(self, user_id, api_key, secret, account_id, orderbook_print_interval=0.5):
+        self.logger = logging.getLogger(self.__class__.__name__)
         self.session = NDAXSession(user_id, api_key, secret)
         self.orderbook = MultiOrderBook(depth=BOOK_DEPTH, debug=False)
         self.orderbook_print_interval = orderbook_print_interval
 
         triangle = TriangleBTCUSDTL1(self.orderbook)
         self.trader = NDAXMarketTriangleTrader(
-            self.session, self.orderbook, account_id, triangle, 50, debug_mode=True, min_trade_value=0.01, sequential=True
+            self.session, self.orderbook, account_id, triangle, 50, debug_mode=True, min_trade_value=0.1, sequential=True
         )
         self.account = NDAXAccount(self.session, account_id)
         self.router = NDAXRouter(
@@ -44,6 +45,8 @@ class NDAXBot:
         tasks = [self.main_loop()]
         if self.orderbook_print_interval:
             tasks.append(self.orderbook_update_loop())
+
+        tasks.append(self.net_asset_change_loop())
 
         await asyncio.gather(*tasks)
 
@@ -67,6 +70,22 @@ class NDAXBot:
             self.orderbook.print_orderbook()
             print('-------')
             await asyncio.sleep(self.orderbook_print_interval*60)
+
+    async def net_asset_change_loop(self, update_time=30): # 30 minutes
+        await asyncio.sleep(10) # Wait for other stuff to initialize
+        current_assets = {k: v for k, v in self.account.positions.items()}
+        self.logger.info(f'Current Assets: {current_assets}')
+        while True: #TODO Chances are low, but this could interfere with trades. It is probably best to schedule this more intelligently
+            await self.account.request_account_update()
+            await asyncio.sleep(10) # TODO: This is bad design. Should use a condition or something.
+            new_assets = {k: v for k, v in self.account.positions.items()}
+
+            for k in new_assets:
+                if new_assets[k] != current_assets[k]:
+                    self.logger.info(f'Net Change in {k}: {new_assets[k] - current_assets[k]}')
+
+
+            await asyncio.sleep(update_time*60)
 
     async def refresh_session(self, mins_until_refresh=30):
         seconds_until_refresh = mins_until_refresh*60

@@ -192,8 +192,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         if self.sequential and len(self.pending_orders) != 0:
             next_request = self.pending_orders.pop(0)
             await self.session.send(next_request)
-
-        if len(self.pending_orders) == 0:
+        elif len(self.pending_orders) == 0:
             self.trade_lock = False
 
 
