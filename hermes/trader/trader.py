@@ -12,10 +12,11 @@ BACKWARD = 1
 
 
 class NDAXTrader:
-    def __init__(self, session, orderbook):
+    def __init__(self, session, orderbook, account_id):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.session = session
         self.orderbook = orderbook
+        self.account_id = account_id
         self.outstanding_trades = []
         self.current_trade_id = 1
         self.trade_lock = False
@@ -29,8 +30,8 @@ class NDAXTrader:
             trade_id = self.create_trade_id()
             payload = {
                 "InstrumentId": order.instrument_id,
-                "OMDId": 1,
-                "AccountId": 1,  # TODO: Get the real one
+                "OMSId": 1,
+                "AccountId": self.account_id,
                 "TimeInForce": order.time_in_force,
                 "ClientOrderId": trade_id,
                 "OrderIdOCO": 0,
@@ -39,8 +40,8 @@ class NDAXTrader:
                 "Quantity": round(order.quantity, 6),
                 "OrderType": order.order_type,
                 "PegPriceType": 1,
-                "LimitPrice": order.limit_price,
             }
+
             requests.append(create_request(0, "SendOrder", payload))
         return requests
 
@@ -64,8 +65,8 @@ class NDAXTrader:
 
 
 class NDAXMarketTriangleLogger(NDAXTrader):
-    def __init__(self, session, orderbook, triangle, cash, debug_mode=False):
-        super().__init__(session, orderbook)
+    def __init__(self, session, orderbook, account_id, triangle, cash, debug_mode=False):
+        super().__init__(session, orderbook, account_id)
         self.triangle = triangle
         self.cash = cash
         self.debug_mode = debug_mode
@@ -107,13 +108,14 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         self,
         session,
         orderbook,
+        account_id,
         triangle,
         cash_available,
         min_trade_value=0.1,
         debug_mode=False,
         sequential=False,
     ):
-        super().__init__(session, orderbook)
+        super().__init__(session, orderbook, account_id)
         self.triangle = triangle
         self.min_trade_value = min_trade_value
         self.cash_available = cash_available
