@@ -10,6 +10,8 @@ from math import floor
 FORWARD = 0
 BACKWARD = 1
 
+QTY_DECIMAL_PLACES = {BTCCAD_ID: 6, BTCUSDT_ID: 6, USDTCAD_ID: 2}
+
 
 class NDAXTrader:
     def __init__(self, session, orderbook, account_id):
@@ -37,7 +39,7 @@ class NDAXTrader:
                 "OrderIdOCO": 0,
                 "UseDisplayQuantity": False,
                 "Side": order.side,
-                "Quantity": round(order.quantity, 6),
+                "Quantity": round(order.quantity, QTY_DECIMAL_PLACES[order.instrument_id]),
                 "OrderType": order.order_type,
                 "PegPriceType": 1,
             }
@@ -129,14 +131,17 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             return
 
         orders = None
-        forward_val = self.triangle.forward_net(self.cash_available)
-        if forward_val > self.min_trade_value:
-            orders = self.triangle.get_forward_orders(self.cash_available)
+        try:
+            forward_val = self.triangle.forward_net(self.cash_available)
+            if forward_val > self.min_trade_value:
+                orders = self.triangle.get_forward_orders(self.cash_available)
 
-        else:
-            backward_val = self.triangle.backward_net(self.cash_available)
-            if backward_val > self.min_trade_value:
-                orders = self.triangle.get_backward_orders(self.cash_available)
+            else:
+                backward_val = self.triangle.backward_net(self.cash_available)
+                if backward_val > self.min_trade_value:
+                    orders = self.triangle.get_backward_orders(self.cash_available)
+        except IndexError as e:
+            self.logger.warning(f'Index Error: {e}')
 
         if not orders:
             return
@@ -174,7 +179,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         instrument_id = event_payload["InstrumentId"]
         value = event_payload["Value"]
 
-        if side == 0:
+        if side == "Buy":
             self.logger.info(
                 f"Bought {instrument_id}: {quantity} at {price}. Value: {value}"
             )
@@ -184,8 +189,8 @@ class NDAXMarketTriangleTrader(NDAXTrader):
                 f"Sold {instrument_id}: {quantity} at {price}. Value: {value}"
             )
 
-        if self.sequential:
-            next_request = self.pending_orders.pop()
+        if self.sequential and len(self.pending_orders) != 0:
+            next_request = self.pending_orders.pop(0)
             await self.session.send(next_request)
 
         if len(self.pending_orders) == 0:
