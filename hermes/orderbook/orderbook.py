@@ -88,7 +88,7 @@ class MultiOrderBook:
         self.book[key] = value
 
     async def update(self, payload):
-        for update in payload:
+        for update in sorted(payload, key=lambda x: x[2]): # sort by action date time
             self.handle_update(L2Update(*update))
 
         if self.debug:
