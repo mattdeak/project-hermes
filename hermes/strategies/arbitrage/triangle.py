@@ -62,18 +62,21 @@ class TriangleBTCUSDTL1:
             side=0,
             quantity=order1_qty,
             order_type=ORDER_TYPE_MARKET,
+            expected_price=btc_cad_ask_price,
         )
         order2 = Order(
             instrument_id=BTCUSDT_ID,
             side=1,
             quantity=order2_qty,
             order_type=ORDER_TYPE_MARKET,
+            expected_price=btc_usdt_bid_price,
         )
         order3 = Order(
             instrument_id=USDTCAD_ID,
             side=1,
             quantity=order3_qty,
             order_type=ORDER_TYPE_MARKET,
+            expected_price=usdt_cad_bid_price
         )
 
         return (order1, order2, order3)
@@ -93,7 +96,7 @@ class TriangleBTCUSDTL1:
         return (multiplier - 1) * value
 
     def get_backward_orders(self, cash_available):
-        fee_adjustment = 1 - self.fees
+        fee_adjustment = self.adjusted_single_trade_value
 
         throughput = self._get_backward_cash_throughput(cash_available)
         if throughput < 0:
@@ -112,18 +115,21 @@ class TriangleBTCUSDTL1:
             side=0,
             quantity=order1_qty,
             order_type=ORDER_TYPE_MARKET,
+            expected_price=usdt_cad_ask_price
         )
         order2 = Order(
             instrument_id=BTCUSDT_ID,
             side=0,
             quantity=order2_qty,
             order_type=ORDER_TYPE_MARKET,
+            expected_price=btc_usdt_ask_price
         )
         order3 = Order(
             instrument_id=BTCCAD_ID,
             side=1,
             quantity=order3_qty,
             order_type=ORDER_TYPE_MARKET,
+            expected_price=btc_cad_bid_price
         )
 
         return (order1, order2, order3)
