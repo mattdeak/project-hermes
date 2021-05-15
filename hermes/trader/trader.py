@@ -19,37 +19,34 @@ class NDAXTrader:
         self.session = session
         self.orderbook = orderbook
         self.account_id = account_id
-        self.outstanding_trades = []
+        self.outstanding_orders = {}
+        self.pending_orders = []
         self.current_trade_id = 1
         self.trade_lock = False
 
     async def run(self):
         pass
 
-    def format_requests(self, orders: List[Order]):
-        requests = []
-        for order in orders:
-            trade_id = self.create_trade_id()
-            payload = {
-                "InstrumentId": order.instrument_id,
-                "OMSId": 1,
-                "AccountId": self.account_id,
-                "TimeInForce": order.time_in_force,
-                "ClientOrderId": trade_id,
-                "OrderIdOCO": 0,
-                "UseDisplayQuantity": False,
-                "Side": order.side,
-                "Quantity": round(order.quantity, QTY_DECIMAL_PLACES[order.instrument_id]),
-                "OrderType": order.order_type,
-                "PegPriceType": 1,
-            }
+    def format_request(self, client_id: int, order: Order):
+        payload = {
+            "InstrumentId": order.instrument_id,
+            "OMSId": 1,
+            "AccountId": self.account_id,
+            "TimeInForce": order.time_in_force,
+            "ClientOrderId": client_id,
+            "OrderIdOCO": 0,
+            "UseDisplayQuantity": False,
+            "Side": order.side,
+            "Quantity": round(order.quantity, QTY_DECIMAL_PLACES[order.instrument_id]),
+            "OrderType": order.order_type,
+            "PegPriceType": 1,
+        }
 
-            requests.append(create_request(0, "SendOrder", payload))
-        return requests
+        request = create_request(0, "SendOrder", payload)
+        return request
 
     def create_trade_id(self):
         self.current_trade_id += 1
-        self.outstanding_trades.append(self.current_trade_id)
         return self.current_trade_id
 
     async def handle_trade_event(self, response):
@@ -67,7 +64,9 @@ class NDAXTrader:
 
 
 class NDAXMarketTriangleLogger(NDAXTrader):
-    def __init__(self, session, orderbook, account_id, triangle, cash, debug_mode=False):
+    def __init__(
+        self, session, orderbook, account_id, triangle, cash, debug_mode=False
+    ):
         super().__init__(session, orderbook, account_id)
         self.triangle = triangle
         self.cash = cash
@@ -123,11 +122,15 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         self.cash_available = cash_available
         self.debug_mode = debug_mode
         self.sequential = sequential
-        self.pending_orders = []
+        self.VALUE_DIFF_THRESH = 0.001
+
         self.trade_lock = False
+        self.permanent_trade_lock = (
+            False  # TODO: Temporary, should restart if this ever occurs
+        )
 
     async def recheck_orderbook_and_trade(self):
-        if self.trade_lock:
+        if self.trade_lock or self.permanent_trade_lock:
             return
 
         orders = None
@@ -141,37 +144,40 @@ class NDAXMarketTriangleTrader(NDAXTrader):
                 if backward_val > self.min_trade_value:
                     orders = self.triangle.get_backward_orders(self.cash_available)
         except IndexError as e:
-            self.logger.warning(f'Index Error: {e}')
+            self.logger.warning(f"Index Error: {e}")
 
         if not orders:
             return
 
-        if self.debug_mode:
-            if forward_val:
-                self.logger.info(f"Forward: Opportunity Detected Worth {forward_val}")
-            else:
-                self.logger.info(f"Backward: Opportunity Detected Worth {backward_val}")
-
-            for i, order in enumerate(orders):
-                self.logger.info(f"Order {i}: {order}")
-
-            self.orderbook.print_orderbook()
-
-        requests = self.format_requests(orders)
-        await self.send_requests(requests)
-
+        await self.process_orders(orders)
         self.trade_lock = True
 
-    async def send_requests(self, requests):
+    async def process_orders(self, orders):
         if self.sequential:
             # Send the first order, queue the other 2
-            self.pending_orders += requests[1:]
-            await self.session.send(requests[0])
+            self.pending_orders += orders[1:]
+            await self.send_order(orders[0])
         else:
-            for req in requests:
-                await self.session.send(req)
+            for order in orders:
+                await self.send_order(order)
 
     async def handle_trade_event(self, event_payload):
+        self.match_order(event_payload)
+
+        if self.sequential and len(self.pending_orders) != 0:
+            next_order = self.pending_orders.pop(0)
+            await self.send_order(next_order)
+        elif len(self.pending_orders) == 0:
+            self.trade_lock = False
+
+    async def send_order(self, order):
+        self.logger.info(f"Sending Order: {order}")
+        trade_id = self.create_trade_id()
+        self.outstanding_orders[trade_id] = order
+        request = self.format_request(trade_id, order)
+        await self.session.send(request)
+
+    def match_order(self, event_payload):
         client_id = event_payload["ClientOrderId"]
         quantity = event_payload["Quantity"]
         price = event_payload["Price"]
@@ -179,21 +185,33 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         instrument_id = event_payload["InstrumentId"]
         value = event_payload["Value"]
 
+        expected_order = self.outstanding_orders[client_id]
+        expected_price = expected_order.expected_price
+
+        flagged = False
+
         if side == "Buy":
             self.logger.info(
                 f"Bought {instrument_id}: {quantity} at {price}. Value: {value}"
             )
-            # TODO: Look up buy/sell sides
+            self.logger.info(f"Expected: {expected_order}")
+
+            price_ratio = price / expected_price # Large value over expected value means more money was paid on the purchase
+
         else:
             self.logger.info(
                 f"Sold {instrument_id}: {quantity} at {price}. Value: {value}"
             )
+            self.logger.info(f"Expected: {expected_order}")
+            price_ratio = expected_price / price # Large expected value over small value means less money was made on the sale
 
-        if self.sequential and len(self.pending_orders) != 0:
-            next_request = self.pending_orders.pop(0)
-            await self.session.send(next_request)
-        elif len(self.pending_orders) == 0:
-            self.trade_lock = False
+        if price_ratio > 1+self.VALUE_DIFF_THRESH:
+            self.logger.warning(
+                f"Value difference of {price_ratio} exceeds threshold, setting permalock."
+            )
+            self.permanent_trade_lock = True
+
+        del self.outstanding_orders[client_id]
 
 
 class NDAXDummyTriangleTrader(NDAXMarketTriangleTrader):
