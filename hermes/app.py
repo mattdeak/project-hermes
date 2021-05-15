@@ -19,7 +19,7 @@ logging.basicConfig()
 
 
 # TODO: Create config file for this stuff
-BOOK_DEPTH = 5 
+BOOK_DEPTH = 10 
 
 
 class NDAXBot:
@@ -95,8 +95,6 @@ class NDAXBot:
 
         raise NotImplementedError()
 
-    async def reset(self):
-        pass
 
     def get_sub_requests(self):
         req1 = create_subscribe_level2_req(BTCCAD_ID, depth=BOOK_DEPTH)
