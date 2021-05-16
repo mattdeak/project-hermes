@@ -10,6 +10,7 @@ USDTCAD_ID = 80
 class UnhandledMessageException(Exception):
     pass
 
+
 class ServerErrorMsg(Exception):
     pass
 
@@ -39,9 +40,9 @@ class NDAXRouter:
         message = json.loads(raw_message)
 
         message_fn = message["n"]
-        payload = json.loads(message['o'])
+        payload = json.loads(message["o"])
         if message_fn == "SubscribeLevel2":  # Should update order book
-            self.logger.info('Subscription Message Received')
+            self.logger.info("Subscription Message Received")
             await self.orderbook.update(payload)
 
         elif message_fn == "Level2UpdateEvent":
@@ -52,23 +53,27 @@ class NDAXRouter:
             await self.account.process_account_positions(payload)
 
         elif message_fn == "OrderTradeEvent":  # Trade confirmation
-            await self.trader.handle_trade_event(payload) 
+            await self.trader.handle_trade_event(payload)
 
-        elif message_fn == 'SubscribeAccountEvents':
-            if not payload['Subscribed']:
-                raise ServerErrorMsg('Subscription to Account Events Failed')
+        elif message_fn == "OrderStateEvent":
+            await self.trader.handle_state_change_event(payload)
+
+        elif message_fn == "SubscribeAccountEvents":
+            if not payload["Subscribed"]:
+                raise ServerErrorMsg("Subscription to Account Events Failed")
             else:
-                self.logger.info('Account Events Successfully Subscribed')
+                self.logger.info("Account Events Successfully Subscribed")
 
-        elif message_fn == 'DepositTicketUpdateEvent':
-            self.logger.info(f'Deposit Ticket Event: {payload}')
+        elif message_fn == "DepositTicketUpdateEvent":
+            self.logger.info(f"Deposit Ticket Event: {payload}")
 
-        elif message_fn == 'SendOrder':
-            self.logger.info(f'SendOrder Response: {message}')
+        elif message_fn == "SendOrder":
+            self.logger.info(f"SendOrder Response: {message}")
 
         elif message_fn in NDAXRouter.ACCOUNT_EVENTS:
-            self.logger.warning(f'Unhandled account message. Not stopping op: {message_fn}')
-
+            self.logger.warning(
+                f"Unhandled account message. Not stopping op: {message_fn}"
+            )
 
         else:
             raise UnhandledMessageException(f"Message type not handled: {message_fn}")
