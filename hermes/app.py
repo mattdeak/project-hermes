@@ -11,6 +11,7 @@ from hermes.trader.trader import NDAXMarketTriangleTrader
 from hermes.exchanges.ndax import create_request
 from hermes.account.ndax import NDAXAccount
 from hermes.router.router import NDAXRouter
+
 import asyncio
 import json
 import logging
