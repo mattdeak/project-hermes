@@ -211,7 +211,13 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             )
             self.permanent_trade_lock = True
 
-        del self.outstanding_orders[client_id]
+    async def handle_state_change_event(self, event_payload):
+        client_id = event_payload["ClientOrderId"]
+        status = event_payload["OrderState"]
+        if status == 'FullyExecuted':
+            await asyncio.sleep(0.1)
+            del self.outstanding_orders[client_id]
+
 
 
 class NDAXDummyTriangleTrader(NDAXMarketTriangleTrader):
