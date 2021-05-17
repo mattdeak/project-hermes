@@ -130,6 +130,7 @@ class NDAXBot:
             # Don't print while there's an ongoing trade
             async with self.trade_lock:
                 self.orderbook.print_orderbook()
+                print('------------------------')
 
     async def net_asset_change_loop(self, update_time=30):  # 30 minutes
         await asyncio.sleep(10)  # Wait for other stuff to initialize
