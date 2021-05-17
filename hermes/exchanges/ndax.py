@@ -147,7 +147,6 @@ class NDAXSession:
         if not payload["Authenticated"]:
             raise AuthError(f"Authentication refused. Returned message: {payload}")
 
-        print(payload) 
         if payload["Authenticated"] and payload["Requires2FA"]:
             self.session_token = await self._authenticate_mfa()
         else:

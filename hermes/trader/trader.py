@@ -128,14 +128,12 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         self.sequential = sequential
         self.VALUE_DIFF_THRESH = 0.001
 
-        self.trade_lock = False
         self.permanent_trade_lock = (
             False  # TODO: Temporary, should restart if this ever occurs
         )
 
     async def recheck_orderbook_and_trade(self):
-
-        if self.permanent_trade_lock:
+        if self.permanent_trade_lock or self.trade_lock.locked():
             return
 
         orders = None
@@ -175,6 +173,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             await self.send_order(next_order)
         elif len(self.pending_orders) == 0:
             await self.trade_lock.release()
+        # TODO: This won't handle non-sequential properly.
 
     async def send_order(self, order):
         self.logger.info(f"Sending Order: {order}")
@@ -201,34 +200,39 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             )
             self.logger.info(f"Expected: {expected_order}")
 
-            price_ratio = price / expected_price # Large value over expected value means more money was paid on the purchase
+            price_ratio = (
+                price / expected_price
+            )  # Large value over expected value means more money was paid on the purchase
 
         else:
             self.logger.info(
                 f"Sold {instrument_id}: {quantity} at {price}. Value: {value}"
             )
             self.logger.info(f"Expected: {expected_order}")
-            price_ratio = expected_price / price # Large expected value over small value means less money was made on the sale
+            price_ratio = (
+                expected_price / price
+            )  # Large expected value over small value means less money was made on the sale
 
         quantity_ratio = quantity / expected_quantity
 
-        if price_ratio > 1+self.VALUE_DIFF_THRESH: # A quantity ratio of at least 0.
-            if quantity_ratio > 0.99: # Then almost the whole trade was executed at the wrong price. Most likely a price mismatch rather than slippage
+        if price_ratio > 1 + self.VALUE_DIFF_THRESH:  # A quantity ratio of at least 0.
+            if (
+                quantity_ratio > 0.99
+            ):  # Then almost the whole trade was executed at the wrong price. Most likely a price mismatch rather than slippage
                 self.logger.warning(
                     f"Value difference of {price_ratio} and quantity ratio of {quantity_ratio} exceeds threshold, setting permalock."
                 )
-                self.reset_trigger.set() # Request a reset in case of synchronization problem
-                self.permanent_trade_lock = True # Shouldn't be needed, but just in case we don't want to trade again before the reset is complete
+                self.reset_trigger.set()  # Request a reset in case of synchronization problem
+                self.permanent_trade_lock = True  # Shouldn't be needed, but just in case we don't want to trade again before the reset is complete
             else:
                 self.logger.warning("Slippage Detected.")
 
     async def handle_state_change_event(self, event_payload):
         client_id = event_payload["ClientOrderId"]
         status = event_payload["OrderState"]
-        if status == 'FullyExecuted':
+        if status == "FullyExecuted":
             await asyncio.sleep(0.1)
             del self.outstanding_orders[client_id]
-
 
 
 class NDAXDummyTriangleTrader(NDAXMarketTriangleTrader):
