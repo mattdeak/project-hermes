@@ -2,6 +2,7 @@ import asyncio
 import logging
 from hermes.exchanges.ndax import create_request, BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID
 from hermes.utils.structures import Order
+from hermes.utils.synchronization import SingletonTradeLock, SingletonResetEvent
 from uuid import uuid1
 from typing import List
 from dataclasses import dataclass
@@ -22,7 +23,10 @@ class NDAXTrader:
         self.outstanding_orders = {}
         self.pending_orders = []
         self.current_trade_id = 1
-        self.trade_lock = False
+
+        # Singleton trade lock, so it can be shared with other components easily
+        self.trade_lock = SingletonTradeLock.instance()
+        self.reset_trigger = SingletonResetEvent.instance()
 
     async def run(self):
         pass
@@ -130,7 +134,8 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         )
 
     async def recheck_orderbook_and_trade(self):
-        if self.trade_lock or self.permanent_trade_lock:
+
+        if self.permanent_trade_lock:
             return
 
         orders = None
@@ -150,7 +155,6 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             return
 
         await self.process_orders(orders)
-        self.trade_lock = True
 
     async def process_orders(self, orders):
         if self.sequential:
@@ -161,6 +165,8 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             for order in orders:
                 await self.send_order(order)
 
+        await self.trade_lock.acquire()
+
     async def handle_trade_event(self, event_payload):
         self.match_order(event_payload)
 
@@ -168,7 +174,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             next_order = self.pending_orders.pop(0)
             await self.send_order(next_order)
         elif len(self.pending_orders) == 0:
-            self.trade_lock = False
+            await self.trade_lock.release()
 
     async def send_order(self, order):
         self.logger.info(f"Sending Order: {order}")
@@ -187,8 +193,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
 
         expected_order = self.outstanding_orders[client_id]
         expected_price = expected_order.expected_price
-
-        flagged = False
+        expected_quantity = expected_order.quantity
 
         if side == "Buy":
             self.logger.info(
@@ -205,11 +210,17 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             self.logger.info(f"Expected: {expected_order}")
             price_ratio = expected_price / price # Large expected value over small value means less money was made on the sale
 
-        if price_ratio > 1+self.VALUE_DIFF_THRESH:
-            self.logger.warning(
-                f"Value difference of {price_ratio} exceeds threshold, setting permalock."
-            )
-            self.permanent_trade_lock = True
+        quantity_ratio = quantity / expected_quantity
+
+        if price_ratio > 1+self.VALUE_DIFF_THRESH: # A quantity ratio of at least 0.
+            if quantity_ratio > 0.99: # Then almost the whole trade was executed at the wrong price. Most likely a price mismatch rather than slippage
+                self.logger.warning(
+                    f"Value difference of {price_ratio} and quantity ratio of {quantity_ratio} exceeds threshold, setting permalock."
+                )
+                self.reset_trigger.set() # Request a reset in case of synchronization problem
+                self.permanent_trade_lock = True # Shouldn't be needed, but just in case we don't want to trade again before the reset is complete
+            else:
+                self.logger.warning("Slippage Detected.")
 
     async def handle_state_change_event(self, event_payload):
         client_id = event_payload["ClientOrderId"]

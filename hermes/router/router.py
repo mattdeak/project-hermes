@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+from hermes.utils.synchronization import SingletonResetEvent
+from hermes.utils.structures import NDAXMessage
 
 BTCCAD_ID = 1
 BTCUSDT_ID = 82
@@ -16,7 +18,6 @@ class ServerErrorMsg(Exception):
 
 
 class NDAXRouter:
-
     ACCOUNT_EVENTS = [
         "AccountPositionEvent",
         "CancelAllOrdersRejectEvent",
@@ -35,12 +36,17 @@ class NDAXRouter:
         self.orderbook = orderbook
         self.trader = trader
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.reset_event = SingletonResetEvent.instance()
 
     async def route(self, raw_message):
-        message = json.loads(raw_message)
 
-        message_fn = message["n"]
-        payload = json.loads(message["o"])
+        message = self.parse_message_safely(raw_message)
+        if not message:
+            return
+
+        message_fn = message.message_fn
+        payload = message.payload
+
         if message_fn == "SubscribeLevel2":  # Should update order book
             self.logger.info("Subscription Message Received")
             await self.orderbook.update(payload)
@@ -77,3 +83,20 @@ class NDAXRouter:
 
         else:
             raise UnhandledMessageException(f"Message type not handled: {message_fn}")
+
+    def parse_message_safely(self, raw_message):
+        """parse_message_safely.
+        If the message can be parsed, parse it and return
+
+        :param raw_message: raw json-encoded bytes message
+        """
+        try:
+            message = json.loads(raw_message)
+
+            message_fn = message["n"]
+            payload = json.loads(message["o"])
+            return NDAXMessage(message, message_fn, payload)
+        except json.decoder.JSONDecodeError as e:
+            self.logger.error(f'Json Decode Error on message: {raw_message}. Requesting reset.')
+            self.reset_event.set()
+            return None

@@ -88,7 +88,8 @@ class MultiOrderBook:
         self.book[key] = value
 
     async def update(self, payload):
-        for update in sorted(payload, key=lambda x: x[2]): # sort by action date time
+        # for update in sorted(payload, key=lambda x: x[2]): # sort by action date time
+        for update in payload:
             self.handle_update(L2Update(*update))
 
         if self.debug:
@@ -101,7 +102,6 @@ class MultiOrderBook:
                 self.logger.info(f'{k}: BID:{v.get_bids()[:depth]}')
             except IndexError:
                 pass
-
 
     def handle_update(self, update):
         if update.Side == 0:
@@ -120,3 +120,8 @@ class MultiOrderBook:
                 book_to_update.pop(price)
             except KeyError as e:
                 pass  # Happens because delete orders are sent irrespective of depth level
+
+    def clear(self):
+        for book in self.book.values():
+            book.ask.clear()
+            book.bid.clear()
