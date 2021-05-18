@@ -172,7 +172,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             next_order = self.pending_orders.pop(0)
             await self.send_order(next_order)
         elif len(self.pending_orders) == 0:
-            await self.trade_lock.release()
+            self.trade_lock.release()
         # TODO: This won't handle non-sequential properly.
 
     async def send_order(self, order):
