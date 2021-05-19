@@ -42,9 +42,9 @@ class NDAXBot:
             self.orderbook,
             account_id,
             triangle,
-            50,
+            80,
             debug_mode=True,
-            min_trade_value=0.1,
+            min_trade_value=0.1, 
             sequential=True,
         )
         self.account = NDAXAccount(self.session, account_id)
@@ -86,9 +86,15 @@ class NDAXBot:
             done, pending = await asyncio.wait(
                 tasks, return_when=asyncio.FIRST_COMPLETED
             )
+
+            # Catch and report exceptions.
+            for done_task in done:
+                e = done_task.exception()
+                if e:
+                    self.logger.error(e)
+
             self.logger.warning("RESET REQUESTED: Acquiring Trade Lock")
             async with self.trade_lock:
-
                 self.logger.warning("RESET REQUESTED: Restarting Tasks")
                 for task in pending:
                     task.cancel()
@@ -121,8 +127,8 @@ class NDAXBot:
         autoreset_interval_in_seconds = autoreset_timer * 60
         while True:
             await asyncio.sleep(autoreset_interval_in_seconds)
+            self.logger.info('Triggering Auto-reset...')
             self.reset_trigger.set()
-            print("Setting Trigger")
 
     async def orderbook_update_loop(self):
         while True:
