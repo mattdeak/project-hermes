@@ -82,7 +82,9 @@ class NDAXRouter:
             )
 
         else:
-            raise UnhandledMessageException(f"Message type not handled: {message_fn}")
+            self.logger.error(
+                f"Unhandled account message. Not stopping op: {message_fn}"
+            )
 
     def parse_message_safely(self, raw_message):
         """parse_message_safely.
