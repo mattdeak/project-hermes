@@ -12,7 +12,6 @@ from hermes.exchanges.ndax import create_request
 from hermes.account.ndax import NDAXAccount
 from hermes.router.router import NDAXRouter
 from hermes.utils.synchronization import SingletonTradeLock, SingletonResetEvent
-from hermes.utils.exceptions import ResetRequested
 
 import asyncio
 import json
