@@ -70,9 +70,9 @@ class OrderBook:
 
 
 class MultiOrderBook:
-    def __init__(self, instrument_ids=(1, 80, 82), depth=5, debug=False):
+    def __init__(self, instrument_keys=(1, 80, 82), depth=5, debug=False):
         self.book = {}
-        self.initialize_book(instrument_ids, depth)
+        self.initialize_book(instrument_keys, depth)
         self.depth = depth
         self.debug = debug
         self.logger = logging.getLogger(self.__class__.__name__)
@@ -88,18 +88,13 @@ class MultiOrderBook:
         self.book[key] = value
 
     async def update(self, payload):
-        # for update in sorted(payload, key=lambda x: x[2]): # sort by action date time
-        for update in payload:
-            self.handle_update(L2Update(*update))
-
-        if self.debug:
-            self.print_orderbook(depth=1)
+        raise NotImplementedError("Please use a child class")
 
     def print_orderbook(self, depth=1):
         for k, v in self.book.items():
             try:
-                self.logger.info(f'{k}: ASK:{v.get_asks()[:depth]}')
-                self.logger.info(f'{k}: BID:{v.get_bids()[:depth]}')
+                self.logger.info(f"{k}: ASK:{v.get_asks()[:depth]}")
+                self.logger.info(f"{k}: BID:{v.get_bids()[:depth]}")
             except IndexError:
                 pass
 
@@ -125,3 +120,15 @@ class MultiOrderBook:
         for book in self.book.values():
             book.ask.clear()
             book.bid.clear()
+
+
+class NDAXOrderbook(MultiOrderBook):
+
+    async def update(self, payload):
+        # for update in sorted(payload, key=lambda x: x[2]): # sort by action date time
+        for update in payload:
+            self.handle_update(L2Update(*update))
+
+
+class KrakenOrderbook:
+    pass

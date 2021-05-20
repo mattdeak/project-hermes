@@ -5,7 +5,6 @@ from hermes.utils.structures import Order
 from hermes.utils.synchronization import SingletonTradeLock, SingletonResetEvent
 from uuid import uuid1
 from typing import List
-from dataclasses import dataclass
 from math import floor
 
 FORWARD = 0
@@ -20,7 +19,7 @@ class NDAXTrader:
         self.session = session
         self.orderbook = orderbook
         self.account_id = account_id
-        self.outstanding_orders = {}
+        self.order_records = {}
         self.pending_orders = []
         self.current_trade_id = 1
 
@@ -54,13 +53,7 @@ class NDAXTrader:
         return self.current_trade_id
 
     async def handle_trade_event(self, response):
-        print(response)
-        if response["n"] == "SendOrder":
-            pass  # TODO: Determine if order was a success
-        elif response["n"] == "OrderTradeEvent":
-            pass  # TODO: handle
-        elif response["n"] == "OrderStateEvent":
-            pass
+        pass
 
     async def send_requests(self, requests):
         for req in requests:
@@ -118,15 +111,14 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         cash_available,
         min_trade_value=0.1,
         debug_mode=False,
-        sequential=False,
     ):
         super().__init__(session, orderbook, account_id)
         self.triangle = triangle
         self.min_trade_value = min_trade_value
         self.cash_available = cash_available
         self.debug_mode = debug_mode
-        self.sequential = sequential
         self.VALUE_DIFF_THRESH = 0.001
+        self.outstanding_orders = []
 
         self.permanent_trade_lock = (
             False  # TODO: Temporary, should restart if this ever occurs
@@ -155,30 +147,23 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         await self.process_orders(orders)
 
     async def process_orders(self, orders):
-        if self.sequential:
-            # Send the first order, queue the other 2
-            self.pending_orders += orders[1:]
-            await self.send_order(orders[0])
-        else:
-            for order in orders:
-                await self.send_order(order)
-
+        # For the market triangle, we just send all of them immediately
         await self.trade_lock.acquire()
 
-    async def handle_trade_event(self, event_payload):
-        self.match_order(event_payload)
+        for order in orders:
+            await self.send_order(order)
 
-        if self.sequential and len(self.pending_orders) != 0:
-            next_order = self.pending_orders.pop(0)
-            await self.send_order(next_order)
-        elif len(self.pending_orders) == 0:
-            self.trade_lock.release()
-        # TODO: This won't handle non-sequential properly.
+    async def handle_trade_event(self, event_payload):
+        self.logger.info("Handling Trade Event")
+        self.match_order(event_payload)
 
     async def send_order(self, order):
         self.logger.info(f"Sending Order: {order}")
+
         trade_id = self.create_trade_id()
-        self.outstanding_orders[trade_id] = order
+        self.order_records[trade_id] = order
+        self.outstanding_orders.append(trade_id)
+
         request = self.format_request(trade_id, order)
         await self.session.send(request)
 
@@ -190,7 +175,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         instrument_id = event_payload["InstrumentId"]
         value = event_payload["Value"]
 
-        expected_order = self.outstanding_orders[client_id]
+        expected_order = self.order_records[client_id]
         expected_price = expected_order.expected_price
         expected_quantity = expected_order.quantity
 
@@ -231,8 +216,13 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         client_id = event_payload["ClientOrderId"]
         status = event_payload["OrderState"]
         if status == "FullyExecuted":
-            await asyncio.sleep(0.1)
-            del self.outstanding_orders[client_id]
+            self.outstanding_orders.remove(client_id)
+            # Release trade lock if everything came back
+            if len(self.outstanding_orders) == 0:
+                self.trade_lock.release()
+
+    def reset(self):
+        self.order_records = {}
 
 
 class NDAXDummyTriangleTrader(NDAXMarketTriangleTrader):

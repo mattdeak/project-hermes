@@ -5,7 +5,7 @@ from hermes.exchanges.ndax import (
     BTCUSDT_ID,
     USDTCAD_ID,
 )
-from hermes.orderbook.orderbook import MultiOrderBook
+from hermes.orderbook.orderbook import NDAXOrderbook
 from hermes.strategies.arbitrage.triangle import TriangleBTCUSDTL1
 from hermes.trader.trader import NDAXMarketTriangleTrader
 from hermes.exchanges.ndax import create_request
@@ -33,7 +33,7 @@ class NDAXBot:
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.session = NDAXSession(user_id, api_key, secret)
-        self.orderbook = MultiOrderBook(depth=BOOK_DEPTH, debug=False)
+        self.orderbook = NDAXOrderbook(instrument_keys=(BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID), depth=BOOK_DEPTH)
         self.orderbook_print_interval = orderbook_print_interval
 
         triangle = TriangleBTCUSDTL1(self.orderbook)
@@ -42,10 +42,9 @@ class NDAXBot:
             self.orderbook,
             account_id,
             triangle,
-            80,
+            50,
             debug_mode=True,
             min_trade_value=0.1, 
-            sequential=True,
         )
         self.account = NDAXAccount(self.session, account_id)
         self.router = NDAXRouter(
