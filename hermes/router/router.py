@@ -30,6 +30,7 @@ class NDAXRouter:
         "PendingDepositUpdate",
     ]
 
+
     def __init__(self, session, account, orderbook, trader):
         self.account = account
         self.session = session
@@ -39,7 +40,6 @@ class NDAXRouter:
         self.reset_event = SingletonResetEvent.instance()
 
     async def route(self, raw_message):
-
         message = self.parse_message_safely(raw_message)
         if not message:
             return
@@ -75,6 +75,9 @@ class NDAXRouter:
 
         elif message_fn == "SendOrder":
             self.logger.info(f"SendOrder Response: {message}")
+
+        elif message_fn == 'NewOrderRejectEvent':
+            self.logger.error(f'Order Rejected: {message}')
 
         elif message_fn in NDAXRouter.ACCOUNT_EVENTS:
             self.logger.warning(

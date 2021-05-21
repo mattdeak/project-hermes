@@ -219,6 +219,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             self.outstanding_orders.remove(client_id)
             # Release trade lock if everything came back
             if len(self.outstanding_orders) == 0:
+                self.logger.info('Releasing Trade Lock')
                 self.trade_lock.release()
 
     def reset(self):
