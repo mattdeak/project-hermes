@@ -39,7 +39,6 @@ class NDAXRouter:
         self.reset_event = SingletonResetEvent.instance()
 
     async def route(self, raw_message):
-
         message = self.parse_message_safely(raw_message)
         if not message:
             return
@@ -102,3 +101,12 @@ class NDAXRouter:
             self.logger.error(f'Json Decode Error on message: {raw_message}. Requesting reset.')
             self.reset_event.set()
             return None
+
+class KrakenRouter:
+
+    def __init__(self, session, account, orderbook, trader):
+        pass
+
+
+    def is_message_l2(self, message):
+        pass
