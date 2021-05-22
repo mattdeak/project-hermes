@@ -72,7 +72,6 @@ async def test(orderbook):
 
 class KrakenOrderBook(MultiOrderBook):
     async def snapshot(self, payload):
-        
         try:
             _id, book, _, instrument = payload
         except Exception as e:
@@ -91,7 +90,9 @@ class KrakenOrderBook(MultiOrderBook):
         try:
             _id, book, _, instrument = payload
         except Exception as e:
+            print(e)
             print(payload)
+            print(len(payload))
             return
         for ask in book.get("a", []):
             l2update = KrakenL2Update(instrument, *ask[:2], Side=1)
@@ -117,10 +118,10 @@ class KrakenOrderBook(MultiOrderBook):
         else:
             book_to_update[price] = quantity
 
-async def gather_all_tasks():
+async def gather_all_tasks(orderbook):
     await asyncio.gather(test(orderbook), print_orderbook_at_interval(orderbook))
 
 
 if __name__ == "__main__":
-    orderbook = KrakenOrderBook(instrument_keys=["XBT/CAD", "ETH/XBT", "ETH/CAD"], depth=DEPTH)
-    asyncio.run(gather_all_tasks())
+    orderbook = KrakenOrderBook(instrument_keys=["XBT/CAD", "ETH/XBT", "ETH/CAD"], depth=DEPTH, use_depth_limiter=False)
+    asyncio.run(gather_all_tasks(orderbook))

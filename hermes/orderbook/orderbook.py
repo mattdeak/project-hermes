@@ -45,10 +45,15 @@ class BidSide(SortedDict):
 
 
 class OrderBook:
-    def __init__(self, depth):
+    def __init__(self, depth, use_depth_limiter=True):
         self.depth = depth
-        self.bid = BidSide(depth)
-        self.ask = AskSide(depth)
+
+        if use_depth_limiter:
+            self.bid = BidSide(depth)
+            self.ask = AskSide(depth)
+        else:
+            self.bid = SortedDict()
+            self.ask = SortedDict()
 
         self.bid_depth_view = self.bid.items()
         self.ask_depth_view = self.ask.items()
@@ -70,16 +75,16 @@ class OrderBook:
 
 
 class MultiOrderBook:
-    def __init__(self, instrument_keys=(1, 80, 82), depth=5, debug=False):
+    def __init__(self, instrument_keys=(1, 80, 82), depth=5, use_depth_limiter=True):
         self.book = {}
-        self.initialize_book(instrument_keys, depth)
+        self.initialize_book(instrument_keys, depth, use_depth_limiter=use_depth_limiter)
         self.depth = depth
-        self.debug = debug
         self.logger = logging.getLogger(self.__class__.__name__)
 
-    def initialize_book(self, instrument_ids, depth):
+
+    def initialize_book(self, instrument_ids, depth, use_depth_limiter=True):
         for _id in instrument_ids:
-            self.book[_id] = OrderBook(depth)
+            self.book[_id] = OrderBook(depth, use_depth_limiter=use_depth_limiter)
 
     def __getitem__(self, key):
         return self.book[key]
@@ -123,12 +128,8 @@ class MultiOrderBook:
 
 
 class NDAXOrderbook(MultiOrderBook):
-
     async def update(self, payload):
         # for update in sorted(payload, key=lambda x: x[2]): # sort by action date time
         for update in payload:
             self.handle_update(L2Update(*update))
 
-
-class KrakenOrderbook:
-    pass
