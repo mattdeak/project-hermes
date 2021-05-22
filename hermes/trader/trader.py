@@ -111,6 +111,7 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         cash_available,
         min_trade_value=0.1,
         debug_mode=False,
+        sequential=False
     ):
         super().__init__(session, orderbook, account_id)
         self.triangle = triangle
@@ -119,10 +120,18 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         self.debug_mode = debug_mode
         self.VALUE_DIFF_THRESH = 0.001
         self.outstanding_orders = []
+        self.pending_orders = []
+        self.sequential = sequential
 
         self.permanent_trade_lock = (
             False  # TODO: Temporary, should restart if this ever occurs
         )
+
+    def reset(self):
+        self.outstanding_orders = []
+        self.pending_orders = []
+        self.permanent_trade_lock = False
+
 
     async def recheck_orderbook_and_trade(self):
         if self.permanent_trade_lock or self.trade_lock.locked():
@@ -150,12 +159,20 @@ class NDAXMarketTriangleTrader(NDAXTrader):
         # For the market triangle, we just send all of them immediately
         await self.trade_lock.acquire()
 
-        for order in orders:
-            await self.send_order(order)
+        if self.sequential:
+            self.pending_orders = orders[1:]
+            await self.send_order(orders[0])
+        else:
+            for order in orders:
+                await self.send_order(order)
 
     async def handle_trade_event(self, event_payload):
         self.logger.info("Handling Trade Event")
         self.match_order(event_payload)
+
+        if self.sequential and len(self.pending_orders) != 0:
+            next_order = self.pending_orders.pop()
+            await self.send_order(next_order)
 
     async def send_order(self, order):
         self.logger.info(f"Sending Order: {order}")
@@ -221,6 +238,11 @@ class NDAXMarketTriangleTrader(NDAXTrader):
             if len(self.outstanding_orders) == 0:
                 self.logger.info('Releasing Trade Lock')
                 self.trade_lock.release()
+        elif status == 'Cancelled':
+            self.logger.error(f'Cancelled: {event_payload}')
+            await asyncio.sleep(0.5) # wait half a second
+            self.trade_lock.release()
+            self.reset_trigger.set()
 
     def reset(self):
         self.order_records = {}
