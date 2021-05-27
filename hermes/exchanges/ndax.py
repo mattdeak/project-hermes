@@ -114,9 +114,12 @@ class NDAXAuth:
 
 
 class NDAXSession:
-    def __init__(self, user_id, apikey, secret):
+    def __init__(self, user_id, apikey, secret, rate_limit=50):
         self.auth_manager = NDAXAuth(user_id, apikey, secret)
         self.logger = logging.getLogger(self.__class__.__name__)
+        self.rate_limit=rate_limit
+        self.call_counter = 0
+
 
     async def initialize_session(self):
         self.session = await websockets.connect(NDAX_URL)
@@ -125,7 +128,13 @@ class NDAXSession:
         await self.session.close()
 
     async def send(self, message):
-        return await self.session.send(message)
+
+        await self.session.send(message)
+        asyncio.create_task(self._increment_and_decrement_call_counter())
+
+    @property
+    def limited(self):
+        return self.call_counter > self.rate_limit
 
     async def recv(self):
         return await self.session.recv()
@@ -163,3 +172,17 @@ class NDAXSession:
             return payload["SessionToken"]
         else:
             raise MFAError(f"MFA Failed: {payload}")
+
+    async def _wait_one_minute_then_clear_rate_limit(self):
+        await asyncio.sleep(60)
+        self.limited = False
+
+    async def _increment_and_decrement_call_counter(self, interval=60):
+        # Debug
+        print('incrementing')
+        self.call_counter += 1
+        await asyncio.sleep(interval)
+        print('decrementing')
+        self.call_counter -= 1
+
+
