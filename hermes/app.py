@@ -11,7 +11,8 @@ from hermes.trader.trader import NDAXMarketTriangleTrader
 from hermes.exchanges.ndax import create_request
 from hermes.account.ndax import NDAXAccount
 from hermes.router.router import NDAXRouter
-from hermes.utils.synchronization import SingletonTradeLock, SingletonResetEvent
+from hermes.utils.synchronization import SingletonTradeLock, SingletonResetEvent, SingletonExitEvent
+import traceback
 
 import asyncio
 import json
@@ -26,13 +27,17 @@ logging.basicConfig()
 BOOK_DEPTH = 10
 
 
+
+
 class NDAXBot:
     def __init__(
         self, user_id, api_key, secret, account_id, orderbook_print_interval=0.5
     ):
         self.logger = logging.getLogger(self.__class__.__name__)
         self.session = NDAXSession(user_id, api_key, secret)
-        self.orderbook = NDAXOrderbook(instrument_keys=(BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID), depth=BOOK_DEPTH)
+        self.orderbook = NDAXOrderbook(
+            instrument_keys=(BTCCAD_ID, BTCUSDT_ID, USDTCAD_ID), depth=BOOK_DEPTH
+        )
         self.orderbook_print_interval = orderbook_print_interval
 
         triangle = TriangleBTCUSDTL1(self.orderbook)
@@ -41,9 +46,10 @@ class NDAXBot:
             self.orderbook,
             account_id,
             triangle,
-            50,
+            300,
             debug_mode=True,
-            min_trade_value=0.1, 
+            min_trade_value=0.6,
+            sequential=True
         )
         self.account = NDAXAccount(self.session, account_id)
         self.router = NDAXRouter(
@@ -53,6 +59,7 @@ class NDAXBot:
         self.event_loop = asyncio.get_event_loop()
         self.trade_lock = SingletonTradeLock.instance(self.event_loop)
         self.reset_trigger = SingletonResetEvent.instance(self.event_loop)
+
 
     def start(self):
         self.event_loop.run_until_complete(self.main_loop())
@@ -90,6 +97,7 @@ class NDAXBot:
                 e = done_task.exception()
                 if e:
                     self.logger.error(e)
+                    traceback.print_exc()
 
             self.logger.warning("RESET REQUESTED: Acquiring Trade Lock")
             async with self.trade_lock:
@@ -98,9 +106,8 @@ class NDAXBot:
                     task.cancel()
 
             self.orderbook.clear()
+            self.trader.reset()
 
-            # TODO: Probably a cleaner way to do this
-            self.trader.permanent_trade_lock = False
             self.reset_trigger.clear()
 
     async def bot_loop(self):
@@ -125,7 +132,7 @@ class NDAXBot:
         autoreset_interval_in_seconds = autoreset_timer * 60
         while True:
             await asyncio.sleep(autoreset_interval_in_seconds)
-            self.logger.info('Triggering Auto-reset...')
+            self.logger.info("Triggering Auto-reset...")
             self.reset_trigger.set()
 
     async def orderbook_update_loop(self):
@@ -134,7 +141,7 @@ class NDAXBot:
             # Don't print while there's an ongoing trade
             async with self.trade_lock:
                 self.orderbook.print_orderbook()
-                print('------------------------')
+                print("------------------------")
 
     async def net_asset_change_loop(self, update_time=30):  # 30 minutes
         await asyncio.sleep(10)  # Wait for other stuff to initialize
